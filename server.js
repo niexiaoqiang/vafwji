@@ -9,7 +9,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: '*',  // 允许所有来源
+  methods: ['GET', 'POST'],
+  credentials: true
+}));
 
 const server = createServer(app);
 const io = new Server(server, {

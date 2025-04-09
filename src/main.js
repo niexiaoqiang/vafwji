@@ -8,7 +8,7 @@ import { io } from 'socket.io-client'
 const app = createApp(App)
 
 // 创建全局socket实例
-const socket = io('http://localhost:3000')
+const socket = io(window.location.hostname === 'localhost' ? 'http://localhost:3000' : `http://${window.location.hostname}:3000`)
 
 // 将socket实例添加到全局属性
 app.config.globalProperties.$socket = socket

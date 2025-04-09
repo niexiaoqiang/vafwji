@@ -100,7 +100,7 @@ export default {
       console.log('正在初始化socket连接...');
       
       // 创建socket.io连接
-      this.socket = io('http://localhost:3000');
+      this.socket = io(window.location.hostname === 'localhost' ? 'http://localhost:3000' : `http://${window.location.hostname}:3000`);
       
       // 设置事件监听
       this.socket.on('connect', () => {
