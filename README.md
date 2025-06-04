@@ -69,15 +69,134 @@ npm run start
 - 命中对方飞机头部后可以继续攻击一次
 - 使用游戏日志追踪攻击历史和结果
 
+## 部署方式
+
+### 传统部署（开发/测试环境）
+
+1. 确保已安装 Node.js 和 npm
+2. 克隆本仓库
+3. 安装依赖：
+
+```bash
+npm install
+```
+
+4. 启动服务器和前端（开发模式）：
+
+```bash
+npm run start
+```
+
+5. 游戏将在 http://localhost:5173 上运行
+
+### Docker部署（推荐生产环境）
+
+#### 方式一：使用Docker Compose（推荐）
+
+1. 确保已安装Docker和Docker Compose
+2. 在项目根目录执行：
+
+```bash
+# 构建并启动容器
+docker-compose up -d
+
+# 查看运行状态
+docker-compose ps
+
+# 查看日志
+docker-compose logs -f
+```
+
+3. 游戏将在 http://localhost:3000 上运行
+
+#### 方式二：使用Docker命令
+
+1. 构建镜像：
+
+```bash
+docker build -t airplane-game .
+```
+
+2. 运行容器：
+
+```bash
+docker run -d \
+  --name airplane-game \
+  -p 3000:3000 \
+  --restart unless-stopped \
+  airplane-game
+```
+
+#### Docker部署优势
+
+- **镜像体积优化**：使用多阶段构建，生产镜像仅包含必要文件
+- **安全性提升**：运行在非root用户环境下
+- **环境一致性**：确保在任何支持Docker的环境中都能正常运行
+- **便于扩展**：可轻松进行水平扩展和负载均衡
+
+#### 管理命令
+
+```bash
+# 停止容器
+docker-compose down
+
+# 重新构建和启动
+docker-compose up -d --build
+
+# 查看容器日志
+docker-compose logs airplane-game
+
+# 进入容器调试
+docker exec -it airplane-game sh
+```
+
 ## 局域网访问说明
 
-要使应用在局域网中可访问，请按以下步骤操作：
+### Docker部署局域网访问
 
 1. 找到本机IP地址（Windows使用`ipconfig`，Mac/Linux使用`ifconfig`或`ip addr`命令）
-2. 确保防火墙允许端口3000和5173的访问
-3. 启动应用：`npm run start`
+2. 确保防火墙允许端口3000的访问
+3. 启动Docker容器：`docker-compose up -d`
 4. 局域网内其他用户可通过以下地址访问：
+   - Docker部署：`http://[你的IP地址]:3000`
+
+### 传统部署局域网访问
+
+1. 确保防火墙允许端口3000和5173的访问
+2. 启动应用：`npm run start`
+3. 局域网内其他用户可通过以下地址访问：
    - 开发环境：`http://[你的IP地址]:5173`
    - 生产环境：`http://[你的IP地址]:3000`
 
-注意：如果使用生产环境，请先执行`npm run build`构建应用。
+注意：如果使用传统生产环境，请先执行`npm run build`构建应用。
+
+## 故障排除
+
+### Docker相关问题
+
+**问题：容器启动失败**
+```bash
+# 检查容器日志
+docker-compose logs airplane-game
+
+# 检查容器状态
+docker-compose ps
+```
+
+**问题：端口被占用**
+```bash
+# 修改docker-compose.yml中的端口映射
+ports:
+  - "3001:3000"  # 将主机端口改为3001
+```
+
+**问题：Socket.io连接失败**
+- 确认防火墙已开放相应端口
+- 检查容器网络配置是否正确
+- 验证客户端连接的URL是否正确
+
+### 性能优化建议
+
+- 生产环境建议使用Docker部署
+- 可考虑使用nginx作为反向代理
+- 启用Docker容器资源限制以优化资源使用
