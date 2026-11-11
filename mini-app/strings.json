@@ -1,0 +1,10 @@
+{
+  "zh_CN": {
+    "name": "炸飞机",
+    "description": "双人联机炸飞机：摆放三架飞机，轮流猜测并轰炸对方机头。"
+  },
+  "en": {
+    "name": "Bomb the Planes",
+    "description": "Two-player online game: place three planes and take turns finding your opponent's cockpits."
+  }
+}

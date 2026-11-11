@@ -1,5 +1,5 @@
 {
-  "name": "vue-project",
+  "name": "airplane-game",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,16 +10,17 @@
     "test:e2e": "playwright test",
     "format": "prettier --write src/",
     "server": "node server.js",
-    "start": "concurrently \"npm run server\" \"npm run dev\""
+    "start": "concurrently \"npm run server\" \"npm run dev\"",
+    "build:mini-app": "vite build --config vite.mini-app.config.js && node scripts/pack-mini-app.mjs",
+    "build:mini-app:debug": "MINI_APP_DEBUG=1 npm run build:mini-app"
   },
   "dependencies": {
+    "@discourse-mini-app/sdk": "file:vendor/mini-app-sdk",
     "concurrently": "^8.2.2",
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "pinia": "^2.1.7",
-    "socket.io": "^4.7.2",
-    "socket.io-client": "^4.7.2",
-    "vue": "^3.3.4"
+    "vue": "^3.3.4",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.39.0",
@@ -27,5 +28,8 @@
     "prettier": "^3.0.3",
     "vite": "^4.4.11",
     "vite-plugin-vue-devtools": "^7.7.2"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

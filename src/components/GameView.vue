@@ -1,2149 +1,1033 @@
 <template>
   <div class="game-view">
-    <div class="game-status">
-      <div class="status-message" :class="{ 'your-turn': isYourTurn }">
-        {{ statusMessage }}
+    <!-- 状态栏：回合、倒计时、剩余飞机 -->
+    <div class="game-status" :class="{ 'is-my-turn': isYourTurn && !gameOver }">
+      <div class="status-main">
+        <div class="status-text">{{ statusMessage }}</div>
+        <div v-if="!gameOver && remainingSeconds !== null" class="turn-timer" :class="{ urgent: remainingSeconds <= 10 }">
+          {{ remainingSeconds }}s
+        </div>
       </div>
-      <div class="game-controls">
-        <button class="btn-danger" @click="leaveGame">退出游戏</button>
+      <div class="status-sub">
+        <span>对方飞机 <b>{{ enemyAlive }}</b>/{{ planeCount }}</span>
+        <span>我方飞机 <b>{{ myAlive }}</b>/{{ planeCount }}</span>
+        <button type="button" class="link-btn" @click="leaveGame">退出</button>
       </div>
+      <div v-if="opponentOffline && !gameOver" class="status-warning">
+        {{ enemyName }} 掉线了，正在等待重连…
+      </div>
+      <div v-if="lastAutoMessage" class="status-note">{{ lastAutoMessage }}</div>
     </div>
-    
-    <div class="game-layout">
-      <div class="game-column">
-        <div class="board-wrapper">
-          <h3>我的棋盘</h3>
-          <div class="board-tip my-board-tip">
-            <!-- 空白提示区域，与对方棋盘区域保持高度一致 -->
-          </div>
-          <div class="board">
-            <div class="board-labels board-row-labels">
-              <div class="label" v-for="i in 10" :key="'my-row-'+i">{{ i }}</div>
-            </div>
-            <div class="board-labels board-col-labels">
-              <div class="label" v-for="col in columns" :key="'my-col-'+col">{{ col }}</div>
-            </div>
-            <div class="board-grid">
-              <div
-                v-for="row in 10"
-                :key="'my-r'+row"
-                class="board-row"
-              >
-                <div
-                  v-for="col in 10"
-                  :key="'my-c'+col"
-                  class="board-cell"
-                  :class="getMyCellClass(row, columns[col-1])"
-                  :data-row="row"
-                  :data-col="columns[col-1]"
-                ></div>
-              </div>
-            </div>
-            <div class="board-right-space"></div>
-          </div>
-        </div>
-        
-        <div class="info-panel">
-          <div class="player-info">
-            <h3>玩家信息</h3>
-            <div v-for="(player, index) in players" :key="player.id" class="player-item">
-              <div class="player-header">
-                <span class="player-name">{{ player.username }}</span>
-                <span class="player-turn" v-if="player.turn">当前回合</span>
-              </div>
-              <div class="plane-status">
-                <div 
-                  v-for="(plane, planeIndex) in player.planes" 
-                  :key="planeIndex"
-                  class="plane-item"
-                  :class="{ 'sunk': plane.sunk }"
-                >
-                  飞机 {{ planeIndex + 1 }}: {{ plane.sunk ? '已击沉' : '正常' }}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      <div class="game-column">
-        <div class="board-wrapper">
+
+    <!-- 手机端用标签切换两个棋盘 -->
+    <div class="board-tabs" role="tablist">
+      <button
+        type="button"
+        role="tab"
+        :class="{ active: activeTab === 'enemy' }"
+        :aria-selected="activeTab === 'enemy'"
+        @click="activeTab = 'enemy'"
+      >
+        对方棋盘<span v-if="isYourTurn && !gameOver" class="tab-dot"></span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        :class="{ active: activeTab === 'mine' }"
+        :aria-selected="activeTab === 'mine'"
+        @click="activeTab = 'mine'"
+      >
+        我的棋盘<span v-if="unseenHits > 0" class="tab-badge">{{ unseenHits }}</span>
+      </button>
+    </div>
+
+    <div class="boards">
+      <!-- 对方棋盘（攻击区） -->
+      <section class="board-panel" :class="{ 'tab-hidden': activeTab !== 'enemy' }">
+        <div class="board-header">
           <h3>对方棋盘</h3>
-          <div class="board-tip">
-            <span class="tip-action tip-attack">左键</span>攻击 
-            <span class="tip-action tip-mark">右键</span>标记 
-            <span class="tip-mark tip-miss">-</span>
-            <span class="tip-mark tip-hit">X</span>
-            <span class="tip-mark tip-sink">O</span>
+          <div class="mode-switch" role="group" aria-label="点击格子的作用">
+            <button type="button" :class="{ active: clickMode === 'attack' }" @click="clickMode = 'attack'">攻击</button>
+            <button type="button" :class="{ active: clickMode === 'mark' }" @click="clickMode = 'mark'">标记</button>
           </div>
-          <div class="board">
-            <div class="board-labels board-row-labels">
-              <div class="label" v-for="i in 10" :key="'opp-row-'+i">{{ i }}</div>
-            </div>
-            <div class="board-labels board-col-labels">
-              <div class="label" v-for="col in columns" :key="'opp-col-'+col">{{ col }}</div>
-            </div>
-            <div class="board-grid">
+        </div>
+        <p class="board-hint">
+          {{ clickMode === 'attack' ? '点击格子发起攻击；击中机头可继续攻击' : '点击格子做标记：· → ✕ → ○ → 清除（电脑上也可右键标记）' }}
+        </p>
+        <div class="grid-wrap">
+          <div class="col-labels"><span v-for="col in columns" :key="col">{{ col }}</span></div>
+          <div class="row-labels"><span v-for="row in 10" :key="row">{{ row }}</span></div>
+          <div class="grid" :class="{ attackable: canAttack && clickMode === 'attack' }">
+            <template v-for="row in 10" :key="'er' + row">
+              <button
+                v-for="col in columns"
+                :key="'e' + row + col"
+                type="button"
+                class="cell"
+                :class="enemyCellClass(row, col)"
+                :aria-label="`${col}${row}`"
+                @click="onEnemyCell(row, col)"
+                @contextmenu.prevent="cycleMark(row, col)"
+              >{{ enemyCellText(row, col) }}</button>
+            </template>
+          </div>
+        </div>
+        <div class="legend">
+          <span><i class="lg lg-miss">·</i>未命中</span>
+          <span><i class="lg lg-hit">✕</i>命中机身</span>
+          <span><i class="lg lg-sink">○</i>击落（机头）</span>
+          <span><i class="lg lg-mark">?</i>我的标记</span>
+        </div>
+      </section>
+
+      <!-- 我的棋盘（防守区） -->
+      <section class="board-panel" :class="{ 'tab-hidden': activeTab !== 'mine' }">
+        <div class="board-header">
+          <h3>我的棋盘</h3>
+        </div>
+        <p class="board-hint">对方的每次攻击都会标在这里</p>
+        <div class="grid-wrap">
+          <div class="col-labels"><span v-for="col in columns" :key="col">{{ col }}</span></div>
+          <div class="row-labels"><span v-for="row in 10" :key="row">{{ row }}</span></div>
+          <div class="grid">
+            <template v-for="row in 10" :key="'mr' + row">
               <div
-                v-for="row in 10"
-                :key="'opp-r'+row"
-                class="board-row"
-              >
-                <div
-                  v-for="col in 10"
-                  :key="'opp-c'+col"
-                  class="board-cell"
-                  :class="getEnemyCellClass(row, columns[col-1])"
-                  :data-row="row"
-                  :data-col="columns[col-1]"
-                  @click="attack(row, columns[col-1])"
-                  @contextmenu.prevent="markCell(row, columns[col-1])"
-                  title="左键点击攻击，右键点击标记"
-                ></div>
-              </div>
-            </div>
-            <div class="board-right-space"></div>
+                v-for="col in columns"
+                :key="'m' + row + col"
+                class="cell"
+                :class="myCellClass(row, col)"
+              >{{ myCellText(row, col) }}</div>
+            </template>
           </div>
         </div>
-        
-        <div class="info-panel">
-          <div class="game-log">
-            <h3>游戏日志</h3>
-            <div class="log-container">
-              <div v-for="(log, index) in gameLogs" :key="index" class="log-item" :class="log.type">
-                {{ log.message }}
-              </div>
-            </div>
-          </div>
+      </section>
+    </div>
+
+    <!-- 对局记录 -->
+    <details class="game-log">
+      <summary>对局记录<span v-if="logs.length" class="log-latest">：{{ logs[0].text }}</span></summary>
+      <ol>
+        <li v-for="item in logs" :key="item.id" :class="'log-' + item.type">{{ item.text }}</li>
+      </ol>
+    </details>
+
+    <!-- 结束弹窗 -->
+    <div v-if="gameOver && showResult" class="game-overlay">
+      <div class="game-result" role="dialog" aria-modal="true">
+        <h2>{{ winner === myId ? '你赢了！' : '你输了' }}</h2>
+        <p v-if="gameOverReason" class="result-reason">{{ gameOverReason }}</p>
+        <p class="result-stats">
+          攻击 {{ myShotCount }} 次 · 命中率 {{ hitRateText }}<span v-if="durationText"> · 用时 {{ durationText }}</span>
+        </p>
+        <p v-if="opponentWantsRematch" class="result-rematch">{{ enemyName }} 想再来一局</p>
+        <div class="result-actions">
+          <button type="button" class="btn-primary" @click="playAgain">再来一局</button>
+          <button type="button" class="btn-secondary" @click="showResult = false">查看棋盘</button>
+          <button type="button" class="btn-secondary" @click="backToLobby">返回大厅</button>
         </div>
       </div>
     </div>
-    
-    <div class="game-overlay" v-if="gameOver">
-      <div class="game-result">
-        <h2>游戏结束</h2>
-        <p>{{ gameOverMessage }}</p>
-        <button class="btn-primary" @click="playAgain">再来一局</button>
-        <button class="btn-secondary" @click="leaveGame">返回大厅</button>
-      </div>
-    </div>
-
-    <!-- 修改攻击结果弹窗结构，使其更加精致 -->
-    <div class="attack-result-popup" v-if="showAttackResultPopup">
-      <div class="attack-result-content" :class="attackResultType">
-        <div class="attack-result-icon">
-          <span v-if="attackResultType === 'miss'">-</span>
-          <span v-else-if="attackResultType === 'hit'">X</span>
-          <span v-else-if="attackResultType === 'sink'">O</span>
-        </div>
-        <div class="attack-result-text">{{ attackResultMessage }}</div>
-      </div>
-    </div>
-
-    <!-- 添加游戏底部区域 -->
-    <div class="game-footer">
-      <button class="btn-exit" @click="exitGame">退出游戏</button>
+    <div v-if="gameOver && !showResult" class="after-game-bar">
+      <span v-if="opponentWantsRematch">{{ enemyName }} 想再来一局</span>
+      <button type="button" class="btn-primary" @click="playAgain">再来一局</button>
+      <button type="button" class="btn-secondary" @click="backToLobby">返回大厅</button>
     </div>
   </div>
 </template>
 
 <script>
+import { storage } from '../platform.js';
+import { notify, confirmDialog } from '../ui/dialog.js';
+import { recordResult } from '../stats.js';
+
+const COLUMNS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+const MARK_CYCLE = { undefined: 'miss', miss: 'hit', hit: 'sink', sink: undefined };
+const key = (row, col) => `${row},${col}`;
+let logSeq = 0;
+
 export default {
   name: 'GameView',
   props: {
-    username: {
-      type: String,
-      required: true
-    },
-    roomId: {
-      type: String,
-      required: true
-    },
-    socket: {
-      type: Object,
-      required: true
-    },
-    gameData: {
-      type: Object,
-      default: null
-    }
+    username: { type: String, required: true },
+    roomId: { type: String, required: true },
+    socket: { type: Object, required: true },
+    gameData: { type: Object, default: null },
+    mode: { type: String, default: 'online' },
+    level: { type: String, default: 'normal' },
   },
+  emits: ['endGame', 'returnToRoom'],
   data() {
     return {
-      players: [],
-      columns: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'],
+      columns: COLUMNS,
       myId: null,
+      players: [],
       currentTurn: null,
-      attackResults: {},
-      userMarks: {},
-      gameLogs: [],
+      turnDeadline: null,
+      now: Date.now(),
+      myShots: {},        // 我对对方的攻击：key -> pending | miss | hit | sink
+      sunkCells: {},      // 对方被击落飞机的格子（由服务器在击落时公开）
+      incoming: {},       // 对方对我的攻击：key -> miss | hit | sink
+      marks: {},          // 我在对方棋盘上的标记
+      revealed: null,     // 对局结束后公开的对方布局
+      clickMode: 'attack', // 点击对方棋盘的作用：攻击 / 标记
+      activeTab: 'enemy',
+      unseenHits: 0,
+      isAttacking: false,
       gameOver: false,
+      showResult: true,
       winner: null,
       gameOverReason: '',
-      isAttacking: false,
-      enemyBoardMessage: '',
-      yourBoardMessage: '',
-      localGameState: null,
-      boardViewOnly: false,
-      gameEndData: null,
-      showAttackResultPopup: false,
-      attackResultType: '',
-      attackResultMessage: ''
+      opponentOffline: false,
+      opponentWantsRematch: false,
+      lastAutoMessage: '',
+      durationMs: 0,
+      logs: [],
     };
   },
   computed: {
-    isYourTurn() {
-      const result = this.currentTurn === this.myId;
-      console.log('回合判断:', { 
-        当前回合ID: this.currentTurn, 
-        我的ID: this.myId, 
-        是否我的回合: result 
-      });
-      return result;
+    me() {
+      return this.players.find((p) => p.id === this.myId) || { planes: [] };
     },
-    hasAttackResults() {
-      return Object.keys(this.attackResults).length > 0;
+    enemy() {
+      return this.players.find((p) => p.id !== this.myId) || { planes: [] };
+    },
+    enemyName() {
+      return this.enemy.username || '对手';
+    },
+    planeCount() {
+      return this.me.planes?.length || 3;
+    },
+    isYourTurn() {
+      return this.currentTurn === this.myId;
+    },
+    canAttack() {
+      return this.isYourTurn && !this.gameOver && !this.isAttacking;
+    },
+    enemyAlive() {
+      return (this.enemy.planes || []).filter((p) => !p.sunk).length;
+    },
+    myAlive() {
+      return (this.me.planes || []).filter((p) => !p.sunk).length;
+    },
+    remainingSeconds() {
+      if (!this.turnDeadline) return null;
+      return Math.max(0, Math.ceil((this.turnDeadline - this.now) / 1000));
     },
     statusMessage() {
-      if (this.gameOver) {
-        return this.gameOverMessage;
-      }
-      return this.isYourTurn ? '你的回合，请选择攻击位置' : '等待对方行动...';
+      if (this.gameOver) return this.winner === this.myId ? '你赢了！' : '你输了';
+      if (this.isYourTurn) return this.isAttacking ? '攻击中…' : '你的回合：选择攻击位置';
+      return `等待 ${this.enemyName} 攻击…`;
     },
-    gameOverMessage() {
-      if (this.winner === this.myId) {
-        return '恭喜你赢得了游戏！';
-      } else if (this.winner) {
-        return '很遗憾，你输了。';
-      } else if (this.gameOverReason) {
-        return this.gameOverReason;
-      }
-      return '游戏结束';
+    myShotCount() {
+      return Object.values(this.myShots).filter((r) => r !== 'pending').length;
     },
-    myPlayer() {
-      return this.players.find(player => player.id === this.myId) || {};
+    hitRateText() {
+      return this.myShotCount ? `${Math.round((this.myHitCount / this.myShotCount) * 100)}%` : '—';
     },
-    enemyPlayer() {
-      return this.players.find(player => player.id !== this.myId) || {};
-    }
+    durationText() {
+      if (!this.durationMs) return '';
+      const total = Math.round(this.durationMs / 1000);
+      return total >= 60 ? `${Math.floor(total / 60)} 分 ${total % 60} 秒` : `${total} 秒`;
+    },
+    myHitCount() {
+      return Object.values(this.myShots).filter((r) => r === 'hit' || r === 'sink').length;
+    },
+    // 我的飞机：格子 -> { planeIndex, part, isHead }
+    myPlaneCells() {
+      const map = {};
+      (this.me.planes || []).forEach((plane, planeIndex) => {
+        (plane.coordinates || []).forEach((c) => {
+          map[key(c.row, c.col)] = { planeIndex, part: c.part, isHead: c.isHead || c.part === 'head' };
+        });
+      });
+      return map;
+    },
+    revealedCells() {
+      const map = {};
+      (this.revealed || []).forEach((plane, planeIndex) => {
+        (plane.coordinates || []).forEach((c) => {
+          map[key(c.row, c.col)] = { planeIndex, isHead: c.isHead || c.part === 'head' };
+        });
+      });
+      return map;
+    },
+  },
+  watch: {
+    isYourTurn(mine) {
+      // 轮到自己时切回对方棋盘
+      if (mine && !this.gameOver) this.activeTab = 'enemy';
+    },
+    activeTab(tab) {
+      if (tab === 'mine') this.unseenHits = 0;
+    },
   },
   mounted() {
     this.myId = this.socket.id;
-    console.log('GameView已挂载，我的ID:', this.myId);
-    console.log('Socket连接状态:', this.socket.connected ? '已连接' : '未连接');
-    
-    // 从App.vue传递的gameData初始化游戏状态
-    if (this.gameData) {
-      console.log('从App接收到游戏数据，初始化游戏:', this.gameData);
-      this.handleGameStart(this.gameData);
-    } else {
-      console.log('没有接收到初始游戏数据，等待gameStart事件');
-    }
-    
-    // 设置socket事件监听
-    this.setupSocketListeners();
-    
-    // 保存当前房间ID到本地存储，用于重连
-    if (this.roomId) {
-      localStorage.setItem('lastRoomId', this.roomId);
-      console.log('保存当前房间ID到本地存储:', this.roomId);
-    }
+    this.ticker = setInterval(() => {
+      this.now = Date.now();
+    }, 250);
+    this.listeners = {
+      gameStart: (data) => this.onGameStart(data),
+      attackResult: (data) => this.onAttackResult(data),
+      turnChange: (data) => this.onTurnChange(data),
+      turnSync: (data) => this.onTurnSync(data),
+      gameOver: (data) => this.onGameOver(data),
+      playerOffline: () => {
+        this.opponentOffline = true;
+        this.addLog(`${this.enemyName} 掉线了，等待重连`, 'warn');
+      },
+      playerOnline: () => {
+        this.opponentOffline = false;
+        this.addLog(`${this.enemyName} 已重新连接`, 'info');
+      },
+      rematchRequested: () => {
+        this.opponentWantsRematch = true;
+      },
+      playerLeft: (data) => {
+        this.opponentWantsRematch = false;
+        this.addLog(`${data?.username || this.enemyName} 离开了房间`, 'warn');
+        if (this.gameOver) notify(`${data?.username || this.enemyName} 已离开房间`);
+      },
+      gameError: (data) => this.onGameError(data),
+    };
+    for (const [event, handler] of Object.entries(this.listeners)) this.socket.on(event, handler);
+    if (this.gameData) this.onGameStart(this.gameData);
   },
   beforeUnmount() {
-    // 移除socket事件监听
-    this.removeSocketListeners();
+    clearInterval(this.ticker);
+    clearTimeout(this.pendingTimer);
+    for (const [event, handler] of Object.entries(this.listeners || {})) this.socket.off(event, handler);
   },
   methods: {
-    // Socket相关方法
-    setupSocketListeners() {
-      // 添加全局事件监听器，记录所有收到的事件
-      this.socket.onAny((eventName, ...args) => {
-        console.log(`收到Socket事件 [${eventName}]:`, JSON.stringify(args));
-      });
-      
-      // 添加更详细的事件处理日志
-      this.socket.on('gameStart', (data) => {
-        console.log('接收到gameStart事件:', JSON.stringify(data));
-        this.handleGameStart(data);
-      });
-      
-      this.socket.on('attackResult', (data) => {
-        console.log('接收到attackResult事件:', JSON.stringify(data));
-        this.handleAttackResult(data);
-      });
-      
-      this.socket.on('turnChange', (data) => {
-        console.log('接收到turnChange事件:', JSON.stringify(data));
-        this.handleTurnChange(data);
-      });
-      
-      this.socket.on('continueTurn', (data) => {
-        console.log('接收到continueTurn事件:', JSON.stringify(data));
-        this.handleContinueTurn(data);
-      });
-      
-      this.socket.on('gameOver', (data) => {
-        console.log('接收到gameOver事件:', JSON.stringify(data));
-        this.handleGameOver(data);
-      });
-      
-      this.socket.on('playerLeft', (data) => {
-        console.log('接收到playerLeft事件:', JSON.stringify(data));
-        this.handlePlayerLeft(data);
-      });
+    addLog(text, type = 'info') {
+      this.logs.unshift({ id: ++logSeq, text, type });
+      if (this.logs.length > 60) this.logs.pop();
     },
-    removeSocketListeners() {
-      console.log('移除所有socket事件监听器');
-      this.socket.offAny();
-      this.socket.off('gameStart');
-      this.socket.off('attackResult');
-      this.socket.off('turnChange');
-      this.socket.off('continueTurn');
-      this.socket.off('gameOver');
-      this.socket.off('playerLeft');
+    setDeadline(ms) {
+      this.turnDeadline = typeof ms === 'number' ? Date.now() + ms : null;
     },
-    
-    // 游戏操作
-    attack(row, col) {
-      console.log('尝试攻击位置:', row, col);
-      
-      // 检查是否允许攻击
-      if (!this.isYourTurn || this.gameOver || this.isAttacking) {
-        console.log('攻击不允许:', {
-          isYourTurn: this.isYourTurn,
-          gameOver: this.gameOver,
-          isAttacking: this.isAttacking
-        });
-        return;
-      }
 
-      const positionKey = `${row},${col}`;
-      
-      // 检查是否已经攻击过该格子
-      if (this.attackResults[positionKey] && this.attackResults[positionKey] !== 'pending') {
-        console.log('该格子已被攻击过了');
-        this.enemyBoardMessage = '这个格子已经被攻击过了';
-        setTimeout(() => {
-          this.enemyBoardMessage = '';
-        }, 3000);
+    // ---------- 服务器事件 ----------
+    onGameStart(data) {
+      this.players = (data.players || []).map((p) => ({ ...p, planes: (p.planes || []).map((plane) => ({ ...plane })) }));
+      this.currentTurn = data.currentTurn || data.firstPlayer;
+      this.setDeadline(data.turnMs);
+      const first = this.players.find((p) => p.id === this.currentTurn);
+      this.addLog(`对局开始：${this.me.username || '我'} vs ${this.enemyName}，${first?.id === this.myId ? '你' : first?.username || '对方'}先手`, 'system');
+    },
+    onTurnChange(data) {
+      this.currentTurn = data.currentTurn;
+      this.isAttacking = false;
+      this.setDeadline(data.turnMs);
+      if (data.continueTurn && data.currentTurn === this.myId) this.addLog('击落机头，继续攻击', 'sink');
+    },
+    onTurnSync(data) {
+      this.currentTurn = data.currentTurn;
+      this.setDeadline(data.remainingMs);
+    },
+    onAttackResult(data) {
+      const { row, col } = data.position || {};
+      const k = key(row, col);
+      const label = `${col}${row}`;
+      const resultText = { miss: '未命中', hit: '命中机身', sink: '击落一架飞机' }[data.result] || data.result;
+      const markSunk = (list, planeIndex) => {
+        const plane = list.planes?.[planeIndex];
+        if (plane) plane.sunk = true;
+      };
+
+      if (data.attacker === this.myId) {
+        clearTimeout(this.pendingTimer);
+        this.isAttacking = false;
+        this.myShots = { ...this.myShots, [k]: data.result };
+        if (this.marks[k]) {
+          const marks = { ...this.marks };
+          delete marks[k];
+          this.marks = marks;
+        }
+        if (data.result === 'sink') {
+          markSunk(this.enemy, data.planeIndex);
+          const cells = { ...this.sunkCells };
+          (data.sunkPlane || []).forEach((c) => {
+            cells[key(c.row, c.col)] = true;
+          });
+          this.sunkCells = cells;
+        }
+        this.lastAutoMessage = data.auto ? `你超时了，系统代你攻击了 ${label}` : '';
+        this.addLog(`${data.auto ? '（超时代打）' : ''}你攻击 ${label}：${resultText}`, data.result);
+      } else {
+        this.incoming = { ...this.incoming, [k]: data.result };
+        if (data.result === 'sink') markSunk(this.me, data.planeIndex);
+        if (data.result !== 'miss' && this.activeTab !== 'mine') this.unseenHits += 1;
+        this.lastAutoMessage = data.auto ? `${this.enemyName} 超时，系统代其攻击了 ${label}` : '';
+        this.addLog(`${this.enemyName} 攻击 ${label}：${resultText}`, data.result === 'miss' ? 'info' : 'danger');
+      }
+    },
+    onGameOver(data) {
+      this.gameOver = true;
+      this.showResult = true;
+      this.winner = data.winner;
+      this.gameOverReason = data.reason || '';
+      this.turnDeadline = null;
+      this.isAttacking = false;
+      const enemyReveal = (data.reveal || []).find((p) => p.id !== this.myId);
+      if (enemyReveal) this.revealed = enemyReveal.planes;
+      this.durationMs = data.durationMs || 0;
+      this.addLog(this.winner === this.myId ? '你赢得了这局' : `这局 ${this.enemyName} 获胜`, 'system');
+      recordResult({
+        mode: this.mode,
+        level: this.level,
+        win: this.winner === this.myId,
+        shots: this.myShotCount,
+        hits: this.myHitCount,
+      }).catch((error) => console.warn('记录战绩失败:', error));
+    },
+    onGameError(data) {
+      if (data?.code !== 'ATTACK_REJECTED') return;
+      const p = data.position;
+      if (p) {
+        const k = key(Number(p.row), String(p.col).toUpperCase());
+        if (this.myShots[k] === 'pending') {
+          const shots = { ...this.myShots };
+          delete shots[k];
+          this.myShots = shots;
+        }
+      }
+      clearTimeout(this.pendingTimer);
+      this.isAttacking = false;
+      notify(data.message || '攻击未被接受');
+    },
+
+    // ---------- 操作 ----------
+    onEnemyCell(row, col) {
+      if (this.clickMode === 'mark') {
+        this.cycleMark(row, col);
         return;
       }
-      
-      // 清除用户自定义标记
-      if (this.userMarks[positionKey]) {
-        console.log('清除用户标记:', this.userMarks[positionKey]);
-        delete this.userMarks[positionKey];
-        this.userMarks = {...this.userMarks};
-      }
-      
-      // 设置攻击中标志
-      this.isAttacking = true;
-      
-      // 设置为pending状态
-      this.attackResults[positionKey] = 'pending';
-      this.attackResults = {...this.attackResults};
-      console.log('设置pending状态:', positionKey);
-      
-      // 发送正确格式的攻击请求：{ position: { row, col } }
-      // 服务器使用 socket.on('attack', ({ position }) => {...}) 接收
-      console.log('发送攻击请求: position={ row: ' + row + ', col: "' + col + '" }');
-      this.socket.emit('attack', { 
-        position: { 
-          row: row, 
-          col: col 
-        } 
-      });
-      
-      this.enemyBoardMessage = '等待攻击结果...';
-      
-      // 添加超时处理，防止请求无响应导致界面锁死
-      setTimeout(() => {
-        if (this.attackResults[positionKey] === 'pending') {
-          console.log('攻击请求5秒无响应，重置状态');
-          delete this.attackResults[positionKey];
-          this.attackResults = {...this.attackResults};
-          this.isAttacking = false;
-          this.enemyBoardMessage = '请求超时，请重试';
-          setTimeout(() => { this.enemyBoardMessage = ''; }, 3000);
-        }
-      }, 5000);
+      this.attack(row, col);
     },
-    markCell(row, col) {
+    attack(row, col) {
       if (this.gameOver) return;
-      
-      const positionKey = `${row},${col}`;
-      
-      // 如果已经有真实的攻击结果，不能标记
-      if (this.attackResults[positionKey]) return;
-      
-      // 循环切换标记: 无标记 -> 'miss'(-) -> 'hit'(X) -> 'sink'(O) -> 无标记
-      if (!this.userMarks[positionKey]) {
-        this.userMarks[positionKey] = 'miss';
-      } else if (this.userMarks[positionKey] === 'miss') {
-        this.userMarks[positionKey] = 'hit';
-      } else if (this.userMarks[positionKey] === 'hit') {
-        this.userMarks[positionKey] = 'sink';
-      } else if (this.userMarks[positionKey] === 'sink') {
-        // 明确处理sink状态，删除标记
-        delete this.userMarks[positionKey];
-        this.userMarks = {...this.userMarks};
-      } else {
-        // 处理任何其他未知状态
-        delete this.userMarks[positionKey];
-        this.userMarks = {...this.userMarks};
+      if (!this.isYourTurn) {
+        notify('还没轮到你');
+        return;
       }
-      
-      // 确保更新响应式
-      this.userMarks = {...this.userMarks};
-      
-      // 调试输出
-      console.log(`标记位置 ${col}${row}: ${this.userMarks[positionKey] || '无标记'}`);
+      if (this.isAttacking) return;
+      const k = key(row, col);
+      if (this.myShots[k]) {
+        notify('这个格子已经攻击过了');
+        return;
+      }
+      if (!this.socket.connected) {
+        notify('连接中断，请稍候重试');
+        return;
+      }
+      this.isAttacking = true;
+      this.myShots = { ...this.myShots, [k]: 'pending' };
+      this.socket.emit('attack', { position: { row, col } });
+      clearTimeout(this.pendingTimer);
+      this.pendingTimer = setTimeout(() => {
+        if (this.myShots[k] === 'pending') {
+          const shots = { ...this.myShots };
+          delete shots[k];
+          this.myShots = shots;
+          this.isAttacking = false;
+          notify('攻击没有得到响应，请重试');
+        }
+      }, 6000);
     },
-    leaveGame() {
-      // 提示用户确认
-      if (confirm('确定要离开游戏吗？')) {
-        // 触发父组件的endGame事件，返回到大厅
-        this.$emit('endGame');
-      }
+    cycleMark(row, col) {
+      const k = key(row, col);
+      if (this.myShots[k] || this.gameOver) return;
+      const next = MARK_CYCLE[this.marks[k]];
+      const marks = { ...this.marks };
+      if (next) marks[k] = next;
+      else delete marks[k];
+      this.marks = marks;
     },
     playAgain() {
-      console.log('请求重新开始游戏，当前房间ID:', this.roomId);
-      
-      // 发送重新开始游戏请求，确保传递当前房间ID
-      this.socket.emit('restartGame', { 
-        roomId: this.roomId,
-        username: this.username
+      this.socket.emit('restartGame', {}, (res) => {
+        if (!res?.success) {
+          notify(res?.message || '无法再来一局');
+          this.backToLobby();
+          return;
+        }
+        this.$emit('returnToRoom', { roomId: res.roomId, state: res.state });
       });
-      
-      // 隐藏游戏结束弹窗
-      this.gameOver = false;
-      
-      // 通知父组件返回房间视图
-      this.$emit('returnToRoom', { 
-        roomId: this.roomId,  // 确保传递正确的房间ID
-        username: this.username 
-      });
-      
-      // 保存当前房间ID到localStorage，确保重连一致性
-      try {
-        localStorage.setItem('currentRoomId', this.roomId);
-        localStorage.setItem('lastRoomId', this.roomId);
-      } catch (e) {
-        console.warn('保存房间ID到本地存储失败:', e);
-      }
-      
-      console.log('已返回房间:', this.roomId);
     },
-    
-    // 获取单元格样式
-    getMyCellClass(row, col) {
-      // 检查是否被敌人攻击
-      for (const attack of this.getAttacksOnMe()) {
-        if (attack.position.row === row && attack.position.col === col) {
-          return `cell-${attack.result}`;
-        }
+    backToLobby() {
+      this.socket.emit('leaveRoom', {});
+      this.$emit('endGame');
+    },
+    async leaveGame() {
+      if (this.gameOver) {
+        this.backToLobby();
+        return;
       }
-      
-      // 检查是否有我的飞机
-      if (this.myPlayer && this.myPlayer.planes) {
-        // 每次重新渲染的第一个单元格，输出调试信息
-        if (row === 1 && col === 'A') {
-          console.log('检查第一个单元格 A1 的飞机匹配情况');
-          console.log('我的飞机数量:', this.myPlayer.planes.length);
-          this.debugShowPlanes();
-        }
-        
-        for (const plane of this.myPlayer.planes) {
-          if (!plane.coordinates || !Array.isArray(plane.coordinates)) {
-            console.error('无效的飞机坐标:', plane);
-            continue;
-          }
-          
-          for (const coord of plane.coordinates) {
-            if (!coord || typeof coord !== 'object') {
-              console.error('无效的坐标对象:', coord);
-              continue;
-            }
-            
-            // 确保类型一致再比较（row转为数值，col转为字符串）
-            const coordRow = typeof coord.row === 'string' ? parseInt(coord.row, 10) : coord.row;
-            const coordCol = typeof coord.col === 'number' ? 
-              String.fromCharCode(64 + coord.col) : coord.col?.toUpperCase();
-            
-            if (coordRow === row && coordCol === col) {
-              // 调试时输出匹配情况
-              console.log(`找到匹配! row=${row}, col=${col}, part=${coord.part || '未知'}, 方向=${plane.direction}`);
-              
-              // 确定这个单元格是飞机的哪个部分
-              let className = 'cell-plane';
-              let partClass = '';
-              
-              if (coord.part) {
-                // 使用服务器发送的part属性
-                partClass = `plane-${coord.part}`;
-              } else if (coord.isHead) {
-                partClass = 'plane-head';
-              } else {
-                partClass = 'plane-body';
-              }
-              
-              // 添加方向类
-              return `${className} ${partClass} direction-${plane.direction}`;
-            }
-          }
-        }
-      } else if (row === 1 && col === 'A') {
-        console.error('无法找到我的飞机数据:', this.myPlayer?.id);
+      if (await confirmDialog('对局还没结束，退出将直接判负。确定退出吗？', { okText: '退出' })) {
+        this.backToLobby();
       }
-      
+    },
+
+    // ---------- 渲染 ----------
+    enemyCellClass(row, col) {
+      const k = key(row, col);
+      const shot = this.myShots[k];
+      const classes = [];
+      if (shot) classes.push(`cell-${shot}`);
+      else if (this.sunkCells[k]) classes.push('cell-sunk-part');
+      else if (this.revealed && this.revealedCells[k]) classes.push('cell-revealed');
+      else if (this.marks[k]) classes.push(`cell-mark cell-mark-${this.marks[k]}`);
+      if (this.sunkCells[k] && shot) classes.push('cell-in-sunk');
+      if (!shot && this.canAttack && this.clickMode === 'attack') classes.push('cell-target');
+      return classes;
+    },
+    enemyCellText(row, col) {
+      const k = key(row, col);
+      const shot = this.myShots[k];
+      if (shot === 'miss') return '·';
+      if (shot === 'hit') return '✕';
+      if (shot === 'sink') return '○';
+      if (!shot && !this.sunkCells[k] && this.marks[k]) return { miss: '·', hit: '✕', sink: '○' }[this.marks[k]];
       return '';
     },
-    getEnemyCellClass(row, col) {
-      const positionKey = `${row},${col}`;
-      const classes = ['board-cell', 'enemy-board-cell'];
-      
-      // 检查是否有攻击结果
-      if (this.attackResults[positionKey]) {
-        const result = this.attackResults[positionKey];
-        // 添加攻击结果对应的类
-        if (result === 'pending') {
-          classes.push('cell-mark-pending');
-        } else if (result === 'miss') {
-          classes.push('cell-miss');
-        } else if (result === 'hit') {
-          classes.push('cell-hit');
-        } else if (result === 'sink') {
-          classes.push('cell-sink');
-        }
-      } 
-      // 检查是否有用户标记
-      else if (this.userMarks[positionKey]) {
-        const mark = this.userMarks[positionKey];
-        if (mark === 'miss') {
-          classes.push('cell-mark-miss');
-        } else if (mark === 'hit') {
-          classes.push('cell-mark-hit');
-        } else if (mark === 'sink') {
-          classes.push('cell-mark-sink');
-        }
+    myCellClass(row, col) {
+      const k = key(row, col);
+      const cell = this.myPlaneCells[k];
+      const classes = [];
+      if (cell) {
+        classes.push('cell-plane', `plane-${cell.planeIndex}`);
+        if (cell.isHead) classes.push('cell-head');
+        if (this.me.planes?.[cell.planeIndex]?.sunk) classes.push('cell-plane-sunk');
       }
-      
-      // 只有在满足以下条件时才添加可点击类：
-      // 1. 是玩家的回合
-      // 2. 游戏没有结束
-      // 3. 不是已经攻击过的格子(结果不是pending)
-      if (this.isYourTurn && !this.gameOver && 
-          !(this.attackResults[positionKey] && this.attackResults[positionKey] !== 'pending')) {
-        classes.push('cell-attackable');
-      }
-      
-      return classes.join(' ');
+      const hit = this.incoming[k];
+      if (hit) classes.push(`cell-incoming-${hit}`);
+      return classes;
     },
-    
-    // 获取敌人对我的攻击
-    getAttacksOnMe() {
-      const attacks = [];
-      
-      for (const log of this.gameLogs) {
-        if (log.type === 'attack' && log.data && log.data.attacker !== this.myId) {
-          attacks.push(log.data);
-        }
-      }
-      
-      return attacks;
+    myCellText(row, col) {
+      const hit = this.incoming[key(row, col)];
+      if (hit === 'miss') return '·';
+      if (hit === 'hit') return '✕';
+      if (hit === 'sink') return '○';
+      return '';
     },
-    
-    // 添加游戏日志
-    addLog(message, type = 'info', data = null) {
-      this.gameLogs.unshift({
-        message,
-        type,
-        timestamp: new Date(),
-        data
-      });
-      
-      // 限制日志最大数量
-      if (this.gameLogs.length > 50) {
-        this.gameLogs.pop();
-      }
-    },
-    
-    // Socket事件处理程序
-    handleGameStart(data) {
-      console.log('游戏开始数据:', JSON.stringify(data));
-      this.players = data.players || [];
-      this.currentTurn = data.firstPlayer;
-      
-      // 找到自己的索引
-      const myIndex = this.players.findIndex(player => player.id === this.myId);
-      console.log('我的玩家索引:', myIndex, '我的ID:', this.myId, '所有玩家:', this.players.map(p => p.id));
-      
-      const enemyIndex = myIndex === 0 ? 1 : 0;
-      
-      // 检查服务器是否发送了飞机数据
-      if (myIndex !== -1) {
-        let myPlanes = this.players[myIndex].planes;
-        
-        if (!myPlanes || myPlanes.length === 0) {
-          // 如果服务器没有发送飞机数据，尝试从localStorage获取
-          console.log('服务器没有发送飞机数据，尝试从本地获取');
-          const storedPlanes = localStorage.getItem('playerPlanes');
-          if (storedPlanes) {
-            try {
-              myPlanes = JSON.parse(storedPlanes);
-              console.log('从localStorage获取到飞机数据:', myPlanes);
-              // 将飞机数据赋给玩家
-              this.players[myIndex].planes = myPlanes;
-            } catch (e) {
-              console.error('解析本地飞机数据失败:', e);
-            }
-          } else {
-            console.error('本地存储中没有飞机数据');
-          }
-        }
-        
-        if (myPlanes && myPlanes.length > 0) {
-          console.log('我的飞机数据:', myPlanes.map(p => ({ direction: p.direction, coordinates: p.coordinates.length })));
-          
-          // 显示坐标样本进行检查
-          if (myPlanes.length > 0 && myPlanes[0].coordinates && myPlanes[0].coordinates.length > 0) {
-            const sampleCoord = myPlanes[0].coordinates[0];
-            console.log('坐标样本:', {
-              row: sampleCoord.row, 
-              col: sampleCoord.col,
-              rowType: typeof sampleCoord.row,
-              colType: typeof sampleCoord.col,
-              part: sampleCoord.part
-            });
-            
-            // 更强的规范化飞机坐标（确保row是数字，col是字母）
-            myPlanes.forEach(plane => {
-              if (plane.coordinates && plane.coordinates.length > 0) {
-                plane.coordinates.forEach(coord => {
-                  // 确保row是数值类型
-                  if (typeof coord.row === 'string') {
-                    coord.row = parseInt(coord.row, 10);
-                  }
-                  
-                  // 确保col是字符串类型（A-J）
-                  if (typeof coord.col === 'number') {
-                    coord.col = String.fromCharCode(64 + coord.col);
-                  } else if (coord.col && typeof coord.col === 'string') {
-                    // 确保col是大写字母
-                    coord.col = coord.col.toUpperCase();
-                  }
-                  
-                  // 如果没有part属性，基于位置添加
-                  if (!coord.part) {
-                    if (coord.isHead) {
-                      coord.part = 'head';
-                    } else if (plane.direction === 0 || plane.direction === 2) { // 上下方向
-                      if (coord.col !== plane.coordinates.find(c => c.isHead).col) {
-                        // 机翼部分
-                        coord.part = 'wing-left';
-                        if (coord.col > plane.coordinates.find(c => c.isHead).col) {
-                          coord.part = 'wing-right';
-                        }
-                      } else {
-                        // 机身或尾翼
-                        if (plane.direction === 0 && coord.row > plane.coordinates.find(c => c.isHead).row + 2) {
-                          coord.part = 'tail-center';
-                        } else if (plane.direction === 2 && coord.row < plane.coordinates.find(c => c.isHead).row - 2) {
-                          coord.part = 'tail-center';
-                        } else {
-                          coord.part = 'body';
-                        }
-                      }
-                    } else { // 左右方向
-                      if (coord.row !== plane.coordinates.find(c => c.isHead).row) {
-                        // 机翼部分
-                        coord.part = 'wing-up';
-                        if (coord.row > plane.coordinates.find(c => c.isHead).row) {
-                          coord.part = 'wing-down';
-                        }
-                      } else {
-                        // 机身或尾翼
-                        if (plane.direction === 1 && coord.col < plane.coordinates.find(c => c.isHead).col - 2) {
-                          coord.part = 'tail-center';
-                        } else if (plane.direction === 3 && coord.col > plane.coordinates.find(c => c.isHead).col + 2) {
-                          coord.part = 'tail-center';
-                        } else {
-                          coord.part = 'body';
-                        }
-                      }
-                    }
-                  }
-                });
-              }
-            });
-            
-            console.log('规范化后的飞机数据:', JSON.stringify(myPlanes[0].coordinates.slice(0, 3)));
-          }
-          
-          // 显示日志帮助调试
-          this.addLog(`载入了${myPlanes.length}架飞机，每架飞机有${myPlanes[0]?.coordinates?.length || 0}个坐标`, 'system');
-          
-          // 立即调用debugShowPlanes查看飞机数据情况
-          this.debugShowPlanes();
-        } else {
-          console.error('没有可用的飞机数据!');
-        }
-      } else {
-        console.error('找不到当前玩家!', this.myId, this.players.map(p => p.id));
-      }
-      
-      if (myIndex !== -1 && enemyIndex !== -1) {
-        this.addLog(`游戏开始! ${this.players[myIndex].username} vs ${this.players[enemyIndex].username}`, 'system');
-        this.addLog(`${this.players[data.firstPlayer === this.myId ? myIndex : enemyIndex].username} 先手`, 'system');
-      }
-    },
-    handleAttackResult(data) {
-      console.log('收到攻击结果:', JSON.stringify(data));
-      
-      // 支持两种可能的数据格式
-      let row, col, result, attacker, planeIndex;
-      
-      if (data.position) {
-        // 格式1: { position: { row, col }, result, attacker, planeIndex }
-        row = data.position.row;
-        col = data.position.col;
-        result = data.result;
-        attacker = data.attacker;
-        planeIndex = data.planeIndex;
-      } else if (data.row !== undefined && data.col !== undefined) {
-        // 格式2: { row, col, result, planeIndex }
-        row = data.row;
-        col = data.col;
-        result = data.result;
-        attacker = data.attacker;
-        planeIndex = data.planeIndex;
-      } else {
-        console.error('无法解析攻击结果数据:', data);
-        return;
-      }
-      
-      const positionKey = `${row},${col}`;
-      
-      // 判断是否是当前玩家发起的攻击
-      if (attacker === this.myId) {
-        // 这是我的攻击，结果应该显示在"对方棋盘"上
-        console.log(`更新我的攻击结果: 位置=${positionKey}, 结果=${result}`);
-        
-        // 更新攻击结果
-        this.attackResults[positionKey] = result;
-        
-        // 如果是击沉，则标记整个飞机为被击中状态
-        if (result === 'sink' && planeIndex !== undefined && planeIndex !== -1) {
-          console.log(`击沉了对方的飞机 #${planeIndex}，标记整个飞机`);
-          
-          // 检查敌方玩家是否有飞机数据
-          if (this.enemyPlayer && this.enemyPlayer.planes && this.enemyPlayer.planes[planeIndex]) {
-            const sunkPlane = this.enemyPlayer.planes[planeIndex];
-            
-            // 检查飞机是否有坐标数据
-            if (sunkPlane.coordinates && Array.isArray(sunkPlane.coordinates)) {
-              // 遍历飞机的所有坐标，将它们都标记为"hit"
-              sunkPlane.coordinates.forEach(coord => {
-                // 确保坐标有效
-                if (coord && coord.row && coord.col) {
-                  const coordKey = `${coord.row},${coord.col}`;
-                  
-                  // 如果这个位置已经被标记为"sink"，不要覆盖它
-                  // 或者这个位置已经被攻击过，保留原有结果
-                  if (!this.attackResults[coordKey]) {
-                    console.log(`标记飞机坐标为击中: ${coordKey}`);
-                    this.attackResults[coordKey] = 'hit';
-                    
-                    // 如果是机头，标记为"sink"
-                    if (coord.part === 'head' || coord.isHead) {
-                      this.attackResults[coordKey] = 'sink';
-                    }
-                  }
-                }
-              });
-            }
-          } else {
-            console.warn('找不到被击沉的飞机数据:', planeIndex);
-          }
-        }
-        
-        // 确保响应式更新
-        this.attackResults = {...this.attackResults};
-        
-        // 清除任何用户标记
-        if (this.userMarks[positionKey]) {
-          delete this.userMarks[positionKey];
-          this.userMarks = {...this.userMarks};
-        }
-        
-        // 根据结果设置消息
-        let message = '';
-        if (result === 'miss') {
-          message = '攻击未命中';
-        } else if (result === 'hit') {
-          message = '攻击命中了敌方飞机';
-        } else if (result === 'sink') {
-          message = '你击沉了敌方飞机！';
-          
-          // 如果是击沉，确保当前回合仍然是当前玩家
-          // 服务器应该会发送continueTurn事件，但为保险起见，也在这里处理
-          this.currentTurn = this.myId;
-          console.log('击沉飞机！回合保持为当前玩家:', this.myId);
-        }
-        
-        this.enemyBoardMessage = message;
-        
-        // 显示攻击结果弹窗
-        this.attackResultType = result;
-        this.attackResultMessage = message;
-        this.showAttackResultPopup = true;
-        
-        // 3秒后隐藏弹窗和消息
-        setTimeout(() => {
-          this.showAttackResultPopup = false;
-          this.enemyBoardMessage = '';
-        }, 2000);
-        
-        // 重置攻击中状态
-        this.isAttacking = false;
-        
-        // 添加到游戏日志
-        this.addLog(`你的攻击结果：${col}${row} - ${result === 'miss' ? '未命中' : (result === 'hit' ? '命中' : '击沉')}`, result);
-        
-        // 在击沉后2秒内如果没有收到continueTurn事件，强制恢复回合状态
-        if (result === 'sink') {
-          setTimeout(() => {
-            if (this.currentTurn !== this.myId || !this.isYourTurn) {
-              console.log('击沉后回合状态未正确更新，强制修复');
-              this.currentTurn = this.myId;
-              this.isAttacking = false;
-              this.addLog('系统修正：击沉后继续你的回合', 'system');
-            }
-          }, 2000);
-        }
-      } else {
-        // 这是对方的攻击，结果应该显示在"我的棋盘"上
-        console.log(`收到对方攻击: 位置=${positionKey}, 结果=${result}`);
-        
-        // 仅添加到日志，不更新attackResults
-        const enemyName = this.enemyPlayer.username || '对方';
-        const resultText = result === 'miss' ? '未命中' : (result === 'hit' ? '命中' : '击沉');
-        this.addLog(`${enemyName} 攻击了 ${col}${row} - ${resultText}`, 'attack', data);
-      }
-    },
-    handleTurnChange(data) {
-      console.log('回合变更:', JSON.stringify(data));
-      
-      // 支持两种可能的数据格式
-      let playerId;
-      if (data.playerId !== undefined) {
-        playerId = data.playerId;
-      } else if (data.currentTurn !== undefined) {
-        playerId = data.currentTurn;
-      } else {
-        console.error('无法解析回合变更数据:', data);
-        return;
-      }
-      
-      // 保存前一个回合状态用于比较
-      const previousTurn = this.currentTurn;
-      
-      // 更新当前回合状态
-      this.currentTurn = playerId;
-      
-      // 重置攻击锁定状态
-      this.isAttacking = false;
-      
-      console.log(`回合更新: ${previousTurn} -> ${this.currentTurn}, 是否我的回合: ${this.isYourTurn}`);
-      
-      // 添加回合变更日志
-      if (playerId === this.myId) {
-        this.enemyBoardMessage = data.continueTurn ? '继续攻击!' : '现在是你的回合';
-        this.addLog(data.continueTurn ? '你击中了对方机头，可以继续攻击' : '轮到你的回合了', 'turn');
-      } else {
-        this.yourBoardMessage = '对方正在攻击...';
-        this.addLog('轮到对方回合', 'turn');
-      }
-      
-      // 3秒后清除消息
-      setTimeout(() => {
-        this.enemyBoardMessage = '';
-        this.yourBoardMessage = '';
-      }, 3000);
-    },
-    handleContinueTurn(data) {
-      console.log('收到继续回合事件:', JSON.stringify(data));
-      
-      // 支持多种可能的数据格式
-      let playerId;
-      if (data.playerId !== undefined) {
-        playerId = data.playerId;
-      } else if (data.currentTurn !== undefined) {
-        playerId = data.currentTurn;
-      } else {
-        console.error('无法解析继续回合数据:', data);
-        return;
-      }
-      
-      console.log(`继续回合详情: 当前回合=${this.currentTurn}, 新回合=${playerId}, 我的ID=${this.myId}`);
-      
-      // 更新当前回合状态
-      this.currentTurn = playerId;
-      
-      // 重置攻击锁定状态
-      this.isAttacking = false;
-      
-      // 根据当前回合玩家发送不同消息
-      if (playerId === this.myId) {
-        this.enemyBoardMessage = '你击沉了对方飞机！继续攻击!';
-        this.addLog('你击沉了对方飞机，获得额外回合', 'sink');
-        
-        // 确保UI状态更新
-        this.$nextTick(() => {
-          console.log('回合状态：', {
-            isYourTurn: this.isYourTurn,
-            currentTurn: this.currentTurn,
-            myId: this.myId
-          });
-        });
-      } else {
-        this.yourBoardMessage = '对方击沉了你的飞机，继续攻击';
-        this.addLog('对方击沉了你的飞机，获得额外回合', 'danger');
-      }
-      
-      // 3秒后清除消息
-      setTimeout(() => {
-        this.enemyBoardMessage = '';
-        this.yourBoardMessage = '';
-      }, 3000);
-    },
-    handleGameOver(data) {
-      // 保存游戏结束数据，包括获胜者和房间ID
-      this.gameEndData = data;
-      this.gameOver = true;
-      this.winner = data.winner;
-      
-      // 保存房间ID用于重新开始游戏
-      if (data.roomId) {
-        localStorage.setItem('lastRoomId', data.roomId);
-        console.log('游戏结束，保存房间ID:', data.roomId);
-      }
-      
-      // 向服务器发送游戏结束状态处理请求
-      this.socket.emit('handleGameOver', {
-        roomId: data.roomId || this.roomId,
-        winner: data.winner
-      });
-      
-      // 添加游戏结束日志
-      if (data.winner === this.myId) {
-        this.addLog('恭喜！你赢得了游戏', 'success');
-      } else if (data.reason) {
-        this.addLog(`游戏结束: ${data.reason}`, 'info');
-      } else {
-        this.addLog('很遗憾，你输了', 'danger');
-      }
-      
-      console.log('游戏结束:', data);
-    },
-    handlePlayerLeft(data) {
-      this.addLog(`${data.username} 离开了游戏`, 'system');
-      this.gameOver = true;
-      this.gameOverReason = '对方离开了游戏';
-    },
-    // 判断是否为尾翼部分
-    isTailPart(plane, coord) {
-      try {
-        const headCoord = plane.coordinates.find(c => c.isHead);
-        if (!headCoord) return false;
-
-        if (plane.direction === 0) { // 朝上
-          return coord.row > headCoord.row + 3;
-        } else if (plane.direction === 1) { // 朝右
-          return coord.col < headCoord.col - 3;
-        } else if (plane.direction === 2) { // 朝下
-          return coord.row < headCoord.row - 3;
-        } else { // 朝左
-          return coord.col > headCoord.col + 3;
-        }
-      } catch (e) {
-        return false;
-      }
-    },
-    // 判断是否为机翼部分
-    isWingPart(plane, coord) {
-      try {
-        const headCoord = plane.coordinates.find(c => c.isHead);
-        if (!headCoord) return false;
-        
-        if (plane.direction === 0 || plane.direction === 2) { // 朝上或朝下
-          // 机翼在左右两侧
-          return coord.col !== headCoord.col;
-        } else { // 朝左或朝右
-          // 机翼在上下两侧
-          return coord.row !== headCoord.row;
-        }
-      } catch (e) {
-        return false;
-      }
-    },
-    // 添加调试方法
-    debugShowPlanes() {
-      if (!this.myPlayer || !this.myPlayer.planes) {
-        console.log('⚠️ 找不到我的飞机数据!');
-        return;
-      }
-      
-      console.log('---飞机数据调试---');
-      if (this.myPlayer.planes.length === 0) {
-        console.log('警告：飞机数组为空');
-        return;
-      }
-      
-      this.myPlayer.planes.forEach((plane, index) => {
-        console.log(`飞机${index+1}:`, {
-          方向: plane.direction,
-          坐标数量: plane.coordinates ? plane.coordinates.length : 0,
-          有效坐标: plane.coordinates ? plane.coordinates.filter(c => c.row && c.col).length : 0,
-          所有坐标: plane.coordinates ? 
-            plane.coordinates.map(c => `(${c.row},${c.col}${c.part ? ','+c.part : ''})`) : []
-        });
-      });
-      console.log('---调试结束---');
-    },
-    // 添加应急方法，用于手动修复游戏状态
-    fixGameState() {
-      if (!this.isYourTurn && !this.gameOver && this.attackResults) {
-        // 检查是否有sink结果但回合未更新
-        const hasSink = Object.values(this.attackResults).includes('sink');
-        if (hasSink) {
-          console.log('检测到可能的游戏状态错误，尝试修复');
-          this.currentTurn = this.myId;
-          this.isAttacking = false;
-          this.addLog('系统修正：回合已重置', 'system');
-          
-          this.$nextTick(() => {
-            console.log('修复后状态：', {
-              isYourTurn: this.isYourTurn,
-              currentTurn: this.currentTurn,
-              myId: this.myId
-            });
-          });
-        }
-      }
-    },
-    exitGame() {
-      if (confirm('确定要退出游戏吗？')) {
-        // 通知服务器玩家离开游戏
-        this.socket.emit('leaveGame');
-        // 触发父组件的endGame事件，返回到大厅
-        this.$emit('endGame');
-      }
-    }
-  }
+  },
 };
 </script>
 
 <style scoped>
 .game-view {
-  position: relative;
   width: 100%;
-  max-width: 1200px;
+  max-width: 1040px;
   margin: 0 auto;
-  padding: 20px;
 }
 
+/* ---------- 状态栏 ---------- */
 .game-status {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 30px;
-  background-color: white;
-  border-radius: 10px;
-  padding: 15px 25px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border: 2px solid transparent;
 }
 
-.status-message {
-  font-size: 1.3rem;
-  font-weight: 600;
-  padding: 12px 25px;
-  border-radius: 8px;
-  background-color: var(--background-color);
-  color: var(--text-color);
-  transition: all 0.3s ease;
-  letter-spacing: 0.5px;
+.game-status.is-my-turn {
+  border-color: var(--secondary-color);
 }
 
-.status-message.your-turn {
-  background-color: var(--primary-color);
-  color: white;
-  animation: pulse 1.5s infinite;
-  box-shadow: 0 0 15px rgba(52, 152, 219, 0.4);
-}
-
-.game-controls button {
-  padding: 12px 25px;
-  font-weight: 600;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-  transition: all 0.3s ease;
-}
-
-.game-layout {
+.status-main {
   display: flex;
-  flex-direction: row;
-  gap: 60px;
+  align-items: center;
   justify-content: space-between;
-  padding: 10px 0;
-  width: 100%;
-  max-width: 1120px;
-  margin: 0 auto;
+  gap: 12px;
 }
 
-.game-column {
-  display: flex;
-  flex-direction: column;
-  flex: 0 0 auto;
-  width: 520px;
-  max-width: 520px;
-}
-
-h3 {
-  text-align: center;
-  margin-bottom: 15px;
-  color: var(--text-color);
-  font-size: 1.4rem;
+.status-text {
+  font-size: 1.15rem;
   font-weight: 600;
-  letter-spacing: 0.5px;
 }
 
-.board-wrapper {
-  position: relative;
-  margin-bottom: 25px;
-  background-color: white;
-  padding: 30px 30px 60px; /* 增加底部padding以容纳提示 */
-  border-radius: 10px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s ease;
+.turn-timer {
+  min-width: 52px;
+  text-align: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef6fc;
+  color: var(--primary-color);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-timer.urgent {
+  background: #fdecea;
+  color: var(--danger-color);
+}
+
+.status-sub {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  width: 100%;
-  height: 620px; /* 增加高度从560px到620px */
-  box-sizing: border-box; /* 确保padding包含在高度内 */
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 0.9rem;
+  color: #5d6d7e;
 }
 
-.board-wrapper:hover {
-  box-shadow: 0 12px 25px rgba(0, 0, 0, 0.15);
+.status-sub b {
+  color: var(--text-color);
 }
 
-.board-wrapper h3 {
-  margin-bottom: 25px;
-  font-size: 1.5rem;
+.link-btn {
+  margin-left: auto;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  background: transparent;
+  color: var(--danger-color);
+  border: 1px solid var(--danger-color);
+  box-shadow: none;
 }
 
-.board {
-  position: relative;
+.link-btn:hover {
+  background: var(--danger-color);
+  color: #fff;
+  transform: none;
+}
+
+.status-warning,
+.status-note {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.status-warning {
+  background: #fff4e5;
+  color: #8a4b00;
+}
+
+.status-note {
+  background: #f2f4f7;
+  color: #5d6d7e;
+}
+
+/* ---------- 棋盘 ---------- */
+.board-tabs {
+  display: none;
+}
+
+.boards {
   display: grid;
-  grid-template-columns: 40px 400px 40px;
-  grid-template-rows: 40px 400px;
-  gap: 0;
-  margin: 0 auto;
-  width: 480px;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
 }
 
-.board-labels {
+.board-panel {
+  background: #fff;
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  min-width: 0;
+}
+
+.board-header {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.board-row-labels {
+.board-header h3 {
+  font-size: 1.05rem;
+}
+
+.board-hint {
+  margin: 4px 0 10px;
+  font-size: 0.8rem;
+  color: #7f8c8d;
+  min-height: 1.2em;
+}
+
+.mode-switch {
+  display: inline-flex;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mode-switch button {
+  padding: 5px 14px;
+  font-size: 0.85rem;
+  border-radius: 0;
+  background: #fff;
+  color: var(--text-color);
+  box-shadow: none;
+}
+
+.mode-switch button:hover {
+  transform: none;
+  background: #f2f4f7;
+}
+
+.mode-switch button.active {
+  background: var(--primary-color);
+  color: #fff;
+}
+
+/* 带坐标的 10×10 网格，随容器宽度缩放 */
+.grid-wrap {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  grid-template-rows: 18px auto;
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.col-labels {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+}
+
+.row-labels {
   grid-column: 1;
   grid-row: 2;
   display: grid;
-  grid-template-rows: repeat(10, 40px);
-  margin: 0;
-  padding: 0;
-  justify-items: center;
-  align-items: center;
+  grid-template-rows: repeat(10, 1fr);
 }
 
-.board-col-labels {
+.col-labels span,
+.row-labels span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  color: #95a5a6;
+}
+
+.grid {
   grid-column: 2;
-  grid-row: 1;
+  grid-row: 2;
   display: grid;
-  grid-template-columns: repeat(10, 40px);
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  width: 400px;
-  justify-items: center;
-  align-items: center;
-}
-
-/* 右侧留白区域 - 使用真实DOM元素替代伪元素 */
-.board-right-space {
-  grid-column: 3;
-  grid-row: 2;
-  width: 40px;
-  height: 400px;
-}
-
-.label {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  color: var(--text-color);
-  width: 100%;
-  height: 100%;
-}
-
-.board-grid {
-  grid-column: 2;
-  grid-row: 2;
-  display: flex;
-  flex-direction: column;
-  border: 2px solid var(--border-color);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  width: 400px;
-  height: 400px;
-  box-sizing: border-box;
-  overflow: hidden;
-  border-radius: 4px;
-}
-
-.board-row {
-  display: flex;
-  width: 100%;
-  height: 40px; /* 固定高度 */
-}
-
-.board-cell {
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--border-color);
-  background-color: white;
-  transition: all 0.2s ease;
-  position: relative;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-.board-cell::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 20px;
-  font-weight: bold;
-}
-
-.cell-attackable:hover {
-  background-color: rgba(52, 152, 219, 0.3);
-  cursor: pointer;
-  transform: scale(1.05);
-  z-index: 5;
-  box-shadow: 0 0 8px rgba(52, 152, 219, 0.5);
-}
-
-.info-panel {
-  flex: 1;
-  background-color: white;
-  border-radius: 10px;
-  padding: 20px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-  margin-bottom: 20px;
-  min-height: 300px;
-  transition: all 0.3s ease;
-}
-
-.info-panel:hover {
-  box-shadow: 0 12px 25px rgba(0, 0, 0, 0.12);
-}
-
-.player-info {
-  width: 100%;
-}
-
-.player-item {
-  margin-bottom: 15px;
-  padding-bottom: 15px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.player-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.player-name {
-  font-weight: 600;
-  font-size: 1.1rem;
-  color: var(--primary-color);
-}
-
-.player-turn {
-  background-color: var(--primary-color);
-  color: white;
-  padding: 4px 10px;
-  border-radius: 5px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  box-shadow: 0 2px 5px rgba(52, 152, 219, 0.4);
-  animation: pulse 1.5s infinite;
-}
-
-.plane-status {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.plane-item {
-  padding: 8px 12px;
-  border-radius: 5px;
-  background-color: var(--background-color);
-  font-size: 0.95rem;
-  font-weight: 500;
-  transition: all 0.2s ease;
-}
-
-.plane-item:hover {
-  transform: translateX(3px);
-}
-
-.plane-item.sunk {
-  background-color: var(--danger-color);
-  color: white;
-  box-shadow: 0 2px 5px rgba(231, 76, 60, 0.4);
-}
-
-.game-log {
-  width: 100%;
-  height: 100%;
-}
-
-.log-container {
-  max-height: 250px;
-  overflow-y: auto;
-  padding-right: 10px;
-}
-
-.log-container::-webkit-scrollbar {
-  width: 6px;
-}
-
-.log-container::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 10px;
-}
-
-.log-container::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 10px;
-}
-
-.log-container::-webkit-scrollbar-thumb:hover {
-  background: #a1a1a1;
-}
-
-.log-item {
-  padding: 10px 15px;
-  margin-bottom: 10px;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+  background: #e3e8ee;
+  padding: 2px;
   border-radius: 6px;
-  font-size: 0.95rem;
-  background-color: var(--background-color);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-  transition: all 0.2s ease;
+  touch-action: manipulation;
 }
 
-.log-item:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-}
-
-.game-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.8);
+.cell {
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 3px;
+  background: #f8fafc;
+  color: var(--text-color);
+  font-size: clamp(0.8rem, 3.6vw, 1.1rem);
+  font-weight: 700;
+  line-height: 1;
   display: flex;
-  justify-content: center;
   align-items: center;
-  z-index: 1000;
-  backdrop-filter: blur(5px);
+  justify-content: center;
+  box-shadow: none;
+  transition: background-color 0.15s;
+  cursor: default;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.game-result {
-  background-color: white;
-  border-radius: 15px;
-  padding: 40px;
-  text-align: center;
-  max-width: 450px;
-  width: 90%;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-  transform: translateY(0);
-  animation: slideUp 0.5s ease;
+button.cell:hover {
+  transform: none;
+  box-shadow: none;
+  background: #f8fafc;
 }
 
-@keyframes slideUp {
-  from {
-    transform: translateY(30px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
+.grid.attackable .cell-target {
+  cursor: crosshair;
 }
 
-.game-result h2 {
-  margin-bottom: 20px;
-  color: var(--text-color);
-  font-size: 2rem;
+.grid.attackable .cell-target:hover {
+  background: #d6eaf8;
 }
 
-.game-result p {
-  margin-bottom: 30px;
-  font-size: 1.3rem;
-  color: var(--text-color);
-  line-height: 1.5;
-}
-
-.game-result button {
-  margin: 0 10px;
-  padding: 12px 25px;
-  font-weight: 600;
-  font-size: 1.1rem;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
-  transition: all 0.3s ease;
-}
-
-@keyframes pulse {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.03);
-  }
-  100% {
-    transform: scale(1);
-  }
+.cell-pending {
+  background: #fef5e7;
+  animation: pulse 0.8s infinite alternate;
 }
 
 .cell-miss {
-  background-color: var(--miss-color);
-}
-
-.cell-miss::after {
-  content: '-';
-  color: white;
-  font-weight: bold;
+  background: #eceff1;
+  color: #90a4ae;
 }
 
 .cell-hit {
-  background-color: var(--hit-color);
-  animation: hitPulse 0.5s ease;
-}
-
-@keyframes hitPulse {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.2); }
-  100% { transform: scale(1); }
-}
-
-.cell-hit::after {
-  content: 'X';
-  color: white;
-  font-weight: bold;
+  background: #fadbd8;
+  color: var(--danger-color);
 }
 
 .cell-sink {
-  background-color: var(--sink-color);
+  background: #1f2d3d;
+  color: #fff;
 }
 
-.cell-sink::after {
-  content: 'O';
-  color: white;
-  font-weight: bold;
+button.cell-sink:hover,
+.cell-sink {
+  background: #1f2d3d;
 }
 
-/* 用户标记样式 - 轮廓风格，更加轻量 */
-.cell-mark-miss {
-  background-color: rgba(127, 140, 141, 0.15);
-  border: 1px dashed var(--miss-color);
+.cell-sunk-part {
+  background: #c9d1d9;
 }
 
-.cell-mark-miss::after {
-  content: '-';
-  color: var(--miss-color);
-  font-weight: 500;
+.cell-hit.cell-in-sunk {
+  background: #e6b0aa;
 }
 
-.cell-mark-hit {
-  background-color: rgba(231, 76, 60, 0.15);
-  border: 1px dashed var(--hit-color);
+.cell-revealed {
+  background: #d6eaf8;
+  outline: 1px dashed var(--primary-color);
+  outline-offset: -3px;
 }
 
-.cell-mark-hit::after {
-  content: 'X';
-  color: var(--hit-color);
-  font-weight: 500;
+.cell-mark {
+  color: var(--warning-color);
+  background: #fffaf0;
 }
 
-.cell-mark-sink {
-  background-color: rgba(0, 0, 0, 0.15);
-  border: 1px dashed var(--sink-color);
-}
-
-.cell-mark-sink::after {
-  content: 'O';
-  color: var(--sink-color);
-  font-weight: 500;
-}
-
-.cell-plane {
-  background-color: var(--plane-color-1);
-  position: relative;
-  z-index: 1;
-  box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.2);
-  transition: all 0.3s ease;
-}
-
-/* 飞机头部样式 */
-.plane-head {
-  background-color: var(--plane-color-2);
-  z-index: 2;
-  border: none;
-}
-
-/* 飞机机身样式 */
-.plane-body {
-  background-color: var(--plane-color-1);
-  border: none;
-}
-
-/* 机翼中心部分样式 */
-.plane-wing-center {
-  background-color: var(--plane-color-1);
-  position: relative;
-  z-index: 1;
-  border: none;
-}
-
-/* 机翼侧面样式 */
-.plane-wing-left,
-.plane-wing-right,
-.plane-wing-up,
-.plane-wing-down {
-  background-color: var(--plane-color-1);
-  border: none;
-}
-
-/* 机翼尖端样式 */
-.plane-wing-left-tip,
-.plane-wing-right-tip,
-.plane-wing-up-tip,
-.plane-wing-down-tip {
-  background-color: var(--plane-color-1);
-  border: none;
-}
-
-/* 尾翼中心部分样式 */
-.plane-tail-center {
-  background-color: var(--plane-color-1);
-  border: none;
-}
-
-/* 尾翼侧面样式 */
-.plane-tail-left,
-.plane-tail-right,
-.plane-tail-up,
-.plane-tail-down {
-  background-color: var(--plane-color-1);
-  border: none;
-}
-
-/* 朝上的飞机样式 */
-.direction-0.plane-head {
-  border-top-left-radius: 50%;
-  border-top-right-radius: 50%;
-  border-bottom: none;
-}
-
-.direction-0.plane-wing-center {
-  border-top: none;
-}
-
-.direction-0.plane-body {
-  border-left: none;
-  border-right: none;
-}
-
-/* 朝右的飞机样式 */
-.direction-1.plane-head {
-  border-top-right-radius: 50%;
-  border-bottom-right-radius: 50%;
-  border-left: none;
-}
-
-.direction-1.plane-wing-center {
-  border-right: none;
-}
-
-.direction-1.plane-body {
-  border-top: none;
-  border-bottom: none;
-}
-
-/* 朝下的飞机样式 */
-.direction-2.plane-head {
-  border-bottom-left-radius: 50%;
-  border-bottom-right-radius: 50%;
-  border-top: none;
-}
-
-.direction-2.plane-wing-center {
-  border-bottom: none;
-}
-
-.direction-2.plane-body {
-  border-left: none;
-  border-right: none;
-}
-
-/* 朝左的飞机样式 */
-.direction-3.plane-head {
-  border-top-left-radius: 50%;
-  border-bottom-left-radius: 50%;
-  border-right: none;
-}
-
-.direction-3.plane-wing-center {
-  border-left: none;
-}
-
-.direction-3.plane-body {
-  border-top: none;
-  border-bottom: none;
-}
-
-/* 朝上的飞机尾翼 */
-.direction-0.plane-tail-center {
-  border-radius: 0; /* 中间保持方形 */
-}
-
-.direction-0.plane-tail-left {
-  border-top-left-radius: 40%;
-  border-bottom-left-radius: 40%;
-}
-
-.direction-0.plane-tail-right {
-  border-top-right-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-/* 朝右的飞机尾翼 */
-.direction-1.plane-tail-center {
-  border-radius: 0; /* 中间保持方形 */
-}
-
-.direction-1.plane-tail-up {
-  border-top-left-radius: 40%;
-  border-top-right-radius: 40%;
-}
-
-.direction-1.plane-tail-down {
-  border-bottom-left-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-/* 朝下的飞机尾翼 */
-.direction-2.plane-tail-center {
-  border-radius: 0; /* 中间保持方形 */
-}
+/* 我的棋盘：三架飞机三种颜色，机头加深 */
+.cell-plane.plane-0 { background: #aed6f1; }
+.cell-plane.plane-1 { background: #a9dfbf; }
+.cell-plane.plane-2 { background: #f5cba7; }
+.cell-plane.cell-head.plane-0 { background: #3498db; }
+.cell-plane.cell-head.plane-1 { background: #27ae60; }
+.cell-plane.cell-head.plane-2 { background: #e67e22; }
 
-.direction-2.plane-tail-left {
-  border-top-left-radius: 40%;
-  border-bottom-left-radius: 40%;
+.cell-plane-sunk {
+  filter: grayscale(0.8);
+  opacity: 0.7;
 }
 
-.direction-2.plane-tail-right {
-  border-top-right-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-/* 朝左的飞机尾翼 */
-.direction-3.plane-tail-center {
-  border-radius: 0; /* 中间保持方形 */
-}
-
-.direction-3.plane-tail-up {
-  border-top-left-radius: 40%;
-  border-top-right-radius: 40%;
-}
-
-.direction-3.plane-tail-down {
-  border-bottom-left-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-.log-item.info {
-  border-left: 3px solid var(--primary-color);
-}
-
-.log-item.system {
-  border-left: 3px solid var(--text-color);
-  font-weight: 500;
-}
-
-.log-item.miss {
-  border-left: 3px solid var(--miss-color);
-}
-
-.log-item.hit {
-  border-left: 3px solid var(--hit-color);
-}
-
-.log-item.sink {
-  border-left: 3px solid var(--sink-color);
-  font-weight: 600;
-}
-
-.log-item.turn {
-  border-left: 3px solid var(--primary-color);
-  font-weight: 500;
-}
-
-.log-item.attack {
-  border-left: 3px solid var(--text-color);
-}
-
-.log-item.bonus {
-  border-left: 3px solid var(--secondary-color);
-  font-weight: 500;
-}
-
-.log-item.danger {
-  border-left: 3px solid var(--danger-color);
-  font-weight: 500;
-}
-
-.log-item.win {
-  background-color: var(--secondary-color);
-  color: white;
-  font-weight: 600;
-  border: none;
-  animation: fadeIn 0.5s ease;
-}
-
-.log-item.lose {
-  background-color: var(--danger-color);
-  color: white;
-  font-weight: 600;
-  border: none;
-  animation: fadeIn 0.5s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* 飞机机翼圆角样式 */
-/* 移除之前的机翼圆角样式 */
-.direction-0.plane-wing-left,
-.direction-0.plane-wing-right,
-.direction-1.plane-wing-up,
-.direction-1.plane-wing-down,
-.direction-2.plane-wing-left,
-.direction-2.plane-wing-right,
-.direction-3.plane-wing-up,
-.direction-3.plane-wing-down {
-  border-radius: 0; /* 移除中间机翼的圆角 */
-}
-
-/* 添加正确的机翼尖端圆角样式 */
-.direction-0.plane-wing-left-tip {
-  border-top-left-radius: 50%;
-  border-bottom-left-radius: 50%;
-}
-
-.direction-0.plane-wing-right-tip {
-  border-top-right-radius: 50%;
-  border-bottom-right-radius: 50%;
-}
-
-.direction-1.plane-wing-up-tip {
-  border-top-left-radius: 50%;
-  border-top-right-radius: 50%;
-}
-
-.direction-1.plane-wing-down-tip {
-  border-bottom-left-radius: 50%;
-  border-bottom-right-radius: 50%;
-}
-
-.direction-2.plane-wing-left-tip {
-  border-top-left-radius: 50%;
-  border-bottom-left-radius: 50%;
-}
-
-.direction-2.plane-wing-right-tip {
-  border-top-right-radius: 50%;
-  border-bottom-right-radius: 50%;
-}
-
-.direction-3.plane-wing-up-tip {
-  border-top-left-radius: 50%;
-  border-top-right-radius: 50%;
-}
-
-.direction-3.plane-wing-down-tip {
-  border-bottom-left-radius: 50%;
-  border-bottom-right-radius: 50%;
-}
-
-@media (max-width: 1150px) {
-  .game-layout {
-    flex-direction: column;
-    align-items: center;
-    gap: 30px;
-  }
-  
-  .game-column {
-    width: 100%;
-    max-width: 520px;
-  }
-}
-
-@media (max-width: 550px) {
-  .game-column {
-    width: 100%;
-    max-width: 440px;
-  }
-  
-  .board-wrapper {
-    padding: 20px 15px 15px;
-  }
-  
-  .board {
-    grid-template-columns: 30px 340px 30px;
-    grid-template-rows: 30px 340px;
-    width: 400px;
-  }
-  
-  .board-grid {
-    width: 340px;
-    height: 340px;
-  }
-  
-  .board-cell, .label {
-    width: 34px;
-    height: 34px;
-  }
-  
-  .board-cell::after {
-    font-size: 16px;
-  }
-  
-  .board-right-space {
-    width: 30px;
-    height: 340px;
-  }
-  
-  .info-panel {
-    min-height: 200px;
-  }
-  
-  .log-container {
-    max-height: 180px;
-  }
-}
-
-/* 添加一个空的右侧留白区域 */
-.board::after {
-  content: none;
-}
-
-/* 整体棋盘区域样式 */
-.board-wrapper h3 {
-  margin-bottom: 20px;
-}
+.cell-incoming-miss { color: #90a4ae; }
+.cell-incoming-hit { color: var(--danger-color); }
+.cell-incoming-sink { color: #fff; background: #1f2d3d !important; }
 
-.board-tip {
-  position: relative;
-  font-size: 0.75rem;
-  color: #333;
-  margin: 0 auto 15px auto;
-  background-color: rgba(245, 247, 250, 0.95);
-  padding: 6px 10px;
-  border-radius: 6px;
-  text-align: center;
-  line-height: 1.3;
-  width: 100%;
-  max-width: 420px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-  border: 1px solid rgba(0,0,0,0.08);
+.legend {
   display: flex;
-  justify-content: center;
-  align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px 12px;
+  margin-top: 10px;
+  font-size: 0.78rem;
+  color: #7f8c8d;
+  justify-content: center;
 }
 
-.tip-mark, .tip-action {
+.lg {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
+  width: 18px;
   height: 18px;
+  margin-right: 4px;
   border-radius: 3px;
-  margin: 0;
-  font-weight: bold;
-  color: white;
-  font-size: 0.75rem;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  font-style: normal;
+  font-weight: 700;
 }
 
-.tip-action {
-  padding: 0 5px;
+.lg-miss { background: #eceff1; color: #90a4ae; }
+.lg-hit { background: #fadbd8; color: var(--danger-color); }
+.lg-sink { background: #1f2d3d; color: #fff; }
+.lg-mark { background: #fffaf0; color: var(--warning-color); }
+
+/* ---------- 对局记录 ---------- */
+.game-log {
+  margin-top: 12px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 10px 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  font-size: 0.85rem;
 }
 
-/* 攻击中状态样式 */
-.cell-mark-pending {
-  background-color: rgba(52, 152, 219, 0.3);
-  animation: pulseBg 1s infinite;
-  position: relative;
-  z-index: 1;
-}
-
-.cell-mark-pending::after {
-  content: '?';
-  color: var(--primary-color);
+.game-log summary {
+  cursor: pointer;
   font-weight: 600;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* 避免pending状态阻碍攻击结果显示 */
-.cell-miss,
-.cell-hit,
-.cell-sink {
-  z-index: 2;
-  position: relative;
+.log-latest {
+  font-weight: 400;
+  color: #7f8c8d;
 }
 
-@keyframes pulseBg {
-  0% { background-color: rgba(52, 152, 219, 0.2); }
-  50% { background-color: rgba(52, 152, 219, 0.4); }
-  100% { background-color: rgba(52, 152, 219, 0.2); }
-}
-
-.fix-button-container {
+.game-log ol {
+  list-style: none;
   margin-top: 8px;
-  text-align: center;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
-.fix-button {
-  background-color: var(--warning-color);
-  color: white;
-  border: none;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  cursor: pointer;
-  margin-bottom: 4px;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-  transition: all 0.2s ease;
+.game-log li {
+  padding: 3px 0;
+  border-bottom: 1px dashed #eef1f4;
 }
 
-.fix-button:hover {
-  background-color: #e67e22;
-  transform: translateY(-1px);
-  box-shadow: 0 3px 7px rgba(0, 0, 0, 0.25);
-}
+.log-danger { color: var(--danger-color); }
+.log-sink { color: #1f2d3d; font-weight: 600; }
+.log-warn { color: #8a4b00; }
+.log-system { color: var(--primary-color); }
 
-.fix-button:active {
-  transform: translateY(1px);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-}
-
-.fix-button-container small {
-  display: block;
-  font-size: 0.8rem;
-  color: #666;
-}
-
-/* 重新设计攻击结果弹窗样式 */
-.attack-result-popup {
+/* ---------- 结束 ---------- */
+.game-overlay {
   position: fixed;
-  top: 80px;
-  left: 50%;
-  transform: translateX(-50%);
+  inset: 0;
   z-index: 1000;
-  pointer-events: none;
-  animation: slideDown 0.3s ease-out, fadeOut 0.3s ease-in 1.7s forwards;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.5);
 }
 
-.attack-result-content {
-  background-color: rgba(255, 255, 255, 0.9);
-  border-radius: 8px;
-  padding: 12px 20px;
+.game-result {
+  width: min(100%, 380px);
+  background: #fff;
+  border-radius: 14px;
+  padding: 24px 20px;
   text-align: center;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+
+.game-result h2 {
+  font-size: 1.6rem;
+  margin-bottom: 8px;
+}
+
+.result-reason,
+.result-stats {
+  color: #5d6d7e;
+  margin-bottom: 6px;
+}
+
+.result-rematch {
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #e8f8f0;
+  color: #1e8449;
+}
+
+.result-actions,
+.after-game-bar {
   display: flex;
-  align-items: center;
-  transform: translateY(-10px);
-  animation: slideIn 0.3s forwards;
-  border-left: 4px solid #ccc;
-  max-width: 250px;
-  backdrop-filter: blur(5px);
-}
-
-.attack-result-content.miss {
-  border-left: 4px solid var(--miss-color);
-  background-color: rgba(127, 140, 141, 0.15);
-}
-
-.attack-result-content.hit {
-  border-left: 4px solid var(--hit-color);
-  background-color: rgba(231, 76, 60, 0.15);
-}
-
-.attack-result-content.sink {
-  border-left: 4px solid var(--sink-color);
-  background-color: rgba(0, 0, 0, 0.75);
-  color: white;
-}
-
-.attack-result-icon {
-  font-size: 1.5rem;
-  font-weight: bold;
-  width: 36px;
-  height: 36px;
-  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: center;
+  margin-top: 16px;
+}
+
+.after-game-bar {
+  position: sticky;
+  bottom: 0;
   align-items: center;
-  border-radius: 50%;
-  margin-right: 12px;
-  flex-shrink: 0;
-}
-
-.attack-result-icon span {
-  transform: scale(0.8);
-  animation: iconPop 0.3s forwards;
-}
-
-.miss .attack-result-icon {
-  background-color: var(--miss-color);
-  color: white;
-}
-
-.hit .attack-result-icon {
-  background-color: var(--hit-color);
-  color: white;
-}
-
-.sink .attack-result-icon {
-  background-color: var(--sink-color);
-  color: white;
-}
-
-.attack-result-text {
-  font-size: 1rem;
-  font-weight: 500;
-  text-align: left;
-  line-height: 1.2;
-}
-
-@keyframes slideDown {
-  from { transform: translate(-50%, -20px); opacity: 0; }
-  to { transform: translate(-50%, 0); opacity: 1; }
-}
-
-@keyframes slideIn {
-  from { transform: translateY(-10px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-
-@keyframes fadeOut {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-
-@keyframes iconPop {
-  0% { transform: scale(0); }
-  50% { transform: scale(1.2); }
-  100% { transform: scale(1); }
-}
-
-.tip-miss {
-  background-color: var(--miss-color);
-  color: white;
-}
-
-.tip-hit {
-  background-color: var(--hit-color);
-  color: white;
-}
-
-.tip-sink {
-  background-color: var(--sink-color);
-  color: white;
-}
-
-.tip-attack {
-  background-color: var(--primary-color);
-  color: white;
-}
-
-.tip-mark {
-  background-color: var(--secondary-color);
-  color: white;
-}
-
-/* 添加我的棋盘提示区域的样式 */
-.my-board-tip {
-  visibility: hidden;
-  min-height: 42px; /* 与对方棋盘的提示区域高度一致 */
-}
-
-.game-footer {
-  display: flex;
-  justify-content: center;
-  margin-top: 20px;
+  background: #fff;
+  border-radius: 12px;
   padding: 10px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 }
 
-.btn-exit {
-  background-color: var(--danger-color);
-  color: white;
-  border: none;
-  padding: 8px 20px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 1rem;
-  transition: all 0.2s ease;
+.btn-secondary {
+  background: #ecf0f1;
+  color: var(--text-color);
 }
 
-.btn-exit:hover {
-  background-color: #c0392b;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+.btn-secondary:hover {
+  background: #dfe6e9;
 }
-</style> 
+
+@keyframes pulse {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+
+/* ---------- 手机：一次只显示一个棋盘 ---------- */
+@media (max-width: 760px) {
+  .board-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .board-tabs button {
+    position: relative;
+    padding: 9px 0;
+    background: #fff;
+    color: var(--text-color);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  }
+
+  .board-tabs button:hover {
+    transform: none;
+  }
+
+  .board-tabs button.active {
+    background: var(--primary-color);
+    color: #fff;
+  }
+
+  .tab-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-left: 6px;
+    border-radius: 50%;
+    background: var(--secondary-color);
+    vertical-align: middle;
+  }
+
+  .tab-badge {
+    display: inline-block;
+    min-width: 18px;
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--danger-color);
+    color: #fff;
+    font-size: 0.75rem;
+    line-height: 18px;
+  }
+
+  .boards {
+    grid-template-columns: 1fr;
+  }
+
+  .board-panel {
+    padding: 10px;
+  }
+
+  .tab-hidden {
+    display: none;
+  }
+
+  .status-text {
+    font-size: 1rem;
+  }
+
+  .status-sub {
+    gap: 10px;
+    font-size: 0.82rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cell-pending {
+    animation: none;
+  }
+}
+</style>

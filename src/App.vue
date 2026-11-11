@@ -1,325 +1,192 @@
 <template>
-  <div class="app">
+  <div :class="['app', { 'app--mini': isMiniApp }]">
     <div class="app-header">
-      <h1>飞机棋游戏</h1>
+      <h1>炸飞机</h1>
+      <button type="button" class="rules-btn" @click="showRules = true">规则</button>
     </div>
-    
+
+    <div v-if="connectionLost && mode === 'online' && view !== 'lobby'" class="conn-banner" role="status">
+      连接中断，正在重连…对局会保留约 45 秒
+    </div>
+
     <div class="app-content">
-      <div v-if="!socketInitialized" class="loading">
-        初始化中...
-      </div>
-      <template v-else>
-        <!-- 添加调试信息 -->
-        <div class="debug-info" v-if="false">
-          当前状态: roomId={{ roomId }}, username={{ username }}, inGame={{ inGame }}
-        </div>
-        
-        <LobbyView 
-          v-if="!roomId && !inGame" 
-          :socket="socket" 
-          @createRoom="handleCreateRoom" 
-          @joinRoom="handleJoinRoom"
-          @joinRoomSuccess="handleJoinRoomSuccess"
-        />
-        <RoomView 
-          v-else-if="roomId && !inGame"
-          :roomId="roomId" 
-          :username="username" 
-          :socket="socket"
-          :isCreator="isCreator"
-          @gameStart="handleGameStart"
-          @endGame="handleReturnToLobby"
-        />
-        <GameView
-          v-else-if="inGame"
-          :socket="socket"
-          :gameData="gameData"
-          @endGame="handleReturnToLobby"
-          @returnToRoom="handleReturnToRoom"
-          :roomId="roomId"
-          :username="username"
-        />
-      </template>
+      <LobbyView
+        v-if="view === 'lobby'"
+        :socket="netSocket"
+        :defaultUsername="defaultUsername"
+        @enter="onEnterRoom"
+        @startAi="onStartAi"
+      />
+      <RoomView
+        v-else-if="view === 'room'"
+        :key="'room-' + viewKey"
+        :socket="activeSocket"
+        :roomId="roomId"
+        :username="username"
+        :initialState="roomState"
+        :mode="mode"
+        @gameStart="onGameStart"
+        @leave="backToLobby"
+      />
+      <GameView
+        v-else-if="view === 'game'"
+        :key="'game-' + viewKey"
+        :socket="activeSocket"
+        :gameData="gameData"
+        :roomId="roomId"
+        :username="username"
+        :mode="mode"
+        :level="aiLevel"
+        @returnToRoom="onReturnToRoom"
+        @endGame="backToLobby"
+      />
+      <p v-if="view === 'lobby' && netNotice" class="net-notice">{{ netNotice }}</p>
     </div>
-    
+
     <div class="app-footer">
-      <p>&copy; 2023 飞机棋在线</p>
+      <p>炸飞机 · 联机或人机对战</p>
     </div>
+
+    <RulesDialog v-if="showRules" @close="showRules = false" />
   </div>
 </template>
 
 <script>
-import { io } from 'socket.io-client';
-import LoginView from './components/LoginView.vue';
+import { markRaw } from 'vue';
+import { notify } from './ui/dialog.js';
+import { initPlatform, connectRealtime, markRendered, isMiniApp } from './platform.js';
+import { createLocalSession } from './local/session.js';
 import RoomView from './components/RoomView.vue';
 import GameView from './components/GameView.vue';
 import LobbyView from './components/LobbyView.vue';
+import RulesDialog from './components/RulesDialog.vue';
 
 export default {
   name: 'App',
-  components: {
-    LoginView,
-    RoomView,
-    GameView,
-    LobbyView
-  },
+  components: { RoomView, GameView, LobbyView, RulesDialog },
   data() {
     return {
-      isLoggedIn: false,
-      inGame: false,
+      isMiniApp,
+      view: 'lobby', // lobby | room | game
+      viewKey: 0,
+      mode: 'online', // online | ai
+      aiLevel: 'normal',
+      netSocket: null,
+      localSocket: null,
       username: '',
       roomId: '',
-      socket: null,
-      socketInitialized: false,
-      view: 'lobby', // 'lobby', 'room', 'game'
+      roomState: null,
       gameData: null,
-      isCreator: false
+      defaultUsername: '',
+      connectionLost: false,
+      netNotice: '',
+      showRules: false,
     };
   },
+  computed: {
+    activeSocket() {
+      return this.mode === 'ai' ? this.localSocket : this.netSocket;
+    },
+  },
   created() {
-    // 立即初始化socket连接，确保在挂载组件前就准备好
-    this.initSocket();
+    this.initNetwork();
   },
   mounted() {
-    // 确保socket已初始化
-    if (!this.socketInitialized) {
-      this.initSocket();
-    }
-    console.log('App已挂载，socket状态:', this.socket ? '已连接' : '未连接');
+    // 首屏（大厅）已渲染，通知微应用容器；人机对战不依赖网络，大厅可以立即使用
+    markRendered();
   },
   beforeUnmount() {
-    // 断开socket连接
-    if (this.socket) {
-      this.socket.disconnect();
-    }
+    this.netSocket?.disconnect();
+    this.localSession?.close();
   },
   methods: {
-    initSocket() {
-      if (this.socket) return; // 防止重复初始化
-      
-      console.log('正在初始化socket连接...');
-      
-      // 创建socket.io连接
-      this.socket = io(window.location.hostname === 'localhost' ? 'http://localhost:3000' : `http://${window.location.hostname}:3000`);
-      
-      // 设置事件监听
-      this.socket.on('connect', () => {
-        console.log('已连接到服务器，socket ID:', this.socket.id);
-        this.socketInitialized = true;
-      });
-      
-      this.socket.on('disconnect', () => {
-        console.log('与服务器断开连接');
-      });
-      
-      this.socket.on('error', (error) => {
-        console.error('Socket错误:', error);
-        alert('连接错误: ' + error);
-      });
-      
-      // 监听服务器强制游戏开始事件
-      this.socket.on('gameStart', (data) => {
-        console.log('服务器通知游戏开始:', data);
-        this.handleGameStart(data);
-      });
-    },
-    handleLogin(data) {
-      this.username = data.username;
-      this.isLoggedIn = true;
-      
-      // 处理连接错误
-      this.socket.on('connect_error', (error) => {
-        console.error('连接错误:', error);
-        alert('无法连接到服务器，请检查网络连接或服务器状态');
-      });
-      
-      // 保存房间ID和是否是创建者
-      if (data.roomId) {
-        this.roomId = data.roomId;
-        
-        // 在URL中添加参数，标记是加入还是创建房间
-        if (!data.isCreator) {
-          // 如果是加入房间，添加join=true参数
-          const url = new URL(window.location.href);
-          url.searchParams.set('join', 'true');
-          window.history.replaceState({}, '', url);
-        } else {
-          // 如果是创建房间，确保没有join参数
-          const url = new URL(window.location.href);
-          url.searchParams.delete('join');
-          window.history.replaceState({}, '', url);
-        }
-      }
-    },
-    startGame(roomId) {
-      this.roomId = roomId;
-      this.inGame = true;
-    },
-    endGame() {
-      this.inGame = false;
-      this.roomId = '';
-    },
-    handleLogout() {
-      if (this.socket) {
-        this.socket.disconnect();
-      }
-      this.isLoggedIn = false;
-      this.inGame = false;
-      this.username = '';
-      this.roomId = '';
-      this.socket = null;
-    },
-    handleJoinRoom(data) {
-      console.log('处理加入房间:', data);
-      this.username = data.username;
-      // 注意：这里不设置roomId，因为可能尚未确认加入成功
-      // 等待joinRoomSuccess事件来设置roomId
-    },
-    handleCreateRoom(data) {
-      console.log('处理创建房间:', data);
-      this.username = data.username;
-      this.roomId = data.roomId;
-      this.isCreator = true;
-      
-      // 强制触发视图更新并打印状态
-      this.$nextTick(() => {
-        console.log('创建房间后视图状态:', {
-          roomId: this.roomId,
-          username: this.username,
-          shouldShowRoomView: !!this.roomId
-        });
-      });
-    },
-    handleGameStart(data) {
-      console.log('处理游戏开始事件:', data);
-      
-      // 确保游戏数据传递到GameView
-      if (data) {
-        // 如果接收到了游戏数据，保存它
-        this.gameData = data;
-        console.log('保存游戏数据:', this.gameData);
-      } else {
-        console.warn('未收到游戏数据!');
-      }
-      
-      // 设置inGame为true触发视图切换
-      this.inGame = true;
-      console.log('游戏开始，设置inGame=true，当前状态:', {
-        inGame: this.inGame,
-        roomId: this.roomId,
-        view: this.view
-      });
-    },
-    handleReturnToLobby() {
-      console.log('返回大厅');
-      this.inGame = false;
-      this.roomId = '';
-      this.gameData = null;
-    },
-    handleReturnToRoom(data) {
-      console.log('处理返回房间事件:', data);
-      
-      // 确保获取到正确的房间ID
-      let roomId = '';
-      if (typeof data === 'object') {
-        roomId = data.roomId || '';
-      } else if (typeof data === 'string') {
-        roomId = data;
-      }
-      
-      // 如果没有传入房间ID，尝试使用当前roomId
-      if (!roomId && this.roomId) {
-        roomId = this.roomId;
-        console.log('使用当前房间ID:', roomId);
-      }
-      
-      // 确保房间ID有效
-      if (!roomId) {
-        console.error('返回房间时没有有效的房间ID');
-        alert('返回房间失败：无法确定房间ID');
-        this.handleReturnToLobby();
+    async initNetwork() {
+      try {
+        const { user } = await initPlatform();
+        if (user) this.defaultUsername = user.name || user.username || '';
+        this.netSocket = markRaw(connectRealtime());
+      } catch (error) {
+        console.error('联机初始化失败:', error);
+        this.netNotice = `暂时无法联机（${error?.message || error}），可以先玩人机对战`;
         return;
       }
-      
-      console.log(`从游戏视图返回房间视图，房间ID: ${roomId}`);
-      
-      // 更新状态
-      this.inGame = false;
-      this.roomId = roomId;
-      
-      // 保存房间ID到localStorage，便于断线重连
-      try {
-        localStorage.setItem('lastRoomId', this.roomId);
-        console.log('房间ID已保存到本地存储:', this.roomId);
-      } catch (e) {
-        console.warn('无法保存房间ID到本地存储:', e);
-      }
-      
-      // 清空游戏数据
-      this.gameData = null;
+      // 免费云实例休眠后首次连接需要唤醒（约 1 分钟）
+      const slowTimer = setTimeout(() => {
+        if (!this.netSocket?.connected) this.netNotice = '游戏服务器正在唤醒，首次连接最长约需 1 分钟；可以先玩人机对战';
+      }, 5000);
+      this.netSocket.on('connect', () => {
+        clearTimeout(slowTimer);
+        this.netNotice = '';
+        this.connectionLost = false;
+      });
+      this.netSocket.on('disconnect', () => {
+        this.connectionLost = true;
+      });
+      this.netSocket.on('reconnect', () => {
+        this.connectionLost = false;
+        if (this.mode === 'online' && this.view !== 'lobby') notify('已重新连接');
+      });
+      // 重连成功但原会话已过期：服务器已判定离开，回到大厅
+      this.netSocket.on('session_lost', () => {
+        this.connectionLost = false;
+        if (this.mode === 'online' && this.view !== 'lobby') {
+          notify('断线时间过长，已离开房间');
+          this.backToLobby();
+        }
+      });
     },
-    handleJoinRoomSuccess(data) {
-      console.log('处理加入房间成功:', data);
-      
-      // 确保获取正确的房间ID和用户名
-      let roomId = '';
-      let username = '';
-      
-      // 根据数据类型提取roomId和username
-      if (typeof data === 'object') {
-        roomId = data.roomId || data.id || '';
-        username = data.username || data.name || this.username;
-      } else if (typeof data === 'string') {
-        roomId = data;
-        username = this.username;
-      }
-      
-      console.log(`从服务器返回数据中提取的房间ID: "${roomId}", 用户名: "${username}"`);
-      
-      // 如果没有获得有效的房间ID，显示警告并尝试使用当前roomId
-      if (!roomId) {
-        console.warn('警告: 服务器未返回有效的房间ID!');
-        if (this.roomId) {
-          console.log(`使用当前房间ID: ${this.roomId}`);
-          roomId = this.roomId;
-        } else {
-          console.error('错误: 无法确定要加入的房间ID!');
-          alert('加入房间失败: 无法确定房间ID');
+    onEnterRoom({ roomId, username, state }) {
+      this.mode = 'online';
+      this.openRoom(roomId, username, state);
+    },
+    onStartAi({ username, level }) {
+      this.localSession?.close();
+      this.localSession = createLocalSession({ level });
+      this.localSocket = markRaw(this.localSession.socket);
+      this.mode = 'ai';
+      this.aiLevel = level;
+      this.localSocket.emit('createRoom', { username }, (res) => {
+        if (!res?.success) {
+          notify(res?.message || '无法开始人机对战');
+          this.backToLobby();
           return;
         }
-      }
-      
-      // 更新状态
-      this.username = username;
-      this.roomId = roomId;
-      this.isCreator = false;
-      
-      console.log(`房间加入成功! 房间ID: ${this.roomId}, 用户名: ${this.username}`);
-      
-      // 保存房间ID到localStorage，便于断线重连
-      try {
-        localStorage.setItem('lastRoomId', this.roomId);
-        localStorage.setItem('lastUsername', this.username);
-        console.log('房间信息已保存到本地存储:', {roomId: this.roomId, username: this.username});
-      } catch (e) {
-        console.warn('无法保存房间信息到本地存储:', e);
-      }
-      
-      // 强制触发视图更新并打印状态
-      this.$nextTick(() => {
-        console.log('视图更新后的状态:', {
-          roomId: this.roomId,
-          username: this.username,
-          shouldShowRoomView: !!this.roomId
-        });
+        this.openRoom(res.roomId, username, res.state);
       });
-    }
-  }
+    },
+    openRoom(roomId, username, state) {
+      this.roomId = roomId;
+      this.username = username;
+      this.roomState = state || null;
+      this.viewKey += 1;
+      this.view = 'room';
+    },
+    onGameStart(data) {
+      this.gameData = data;
+      this.viewKey += 1;
+      this.view = 'game';
+    },
+    onReturnToRoom({ roomId, state } = {}) {
+      this.openRoom(roomId || this.roomId, this.username, state);
+    },
+    backToLobby() {
+      if (this.mode === 'ai') {
+        this.localSession?.close();
+        this.localSession = null;
+        this.localSocket = null;
+        this.mode = 'online';
+      }
+      this.view = 'lobby';
+      this.roomId = '';
+      this.roomState = null;
+      this.gameData = null;
+    },
+  },
 };
 </script>
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+/* 不再加载外部字体：微应用不允许远程样式/字体 URL，使用系统字体栈 */
 
 :root {
   --primary-color: #3498db;
@@ -344,48 +211,8 @@ export default {
   box-sizing: border-box;
 }
 
-/* 防止显示JSON对象 */
-.player-item {
-  position: relative !important;
-  /* 强制不显示伪元素内容 */
-  content: none !important;
-}
-
-.player-item::before, 
-.player-item::after {
-  display: none !important;
-  content: none !important;
-}
-
-/* 防止显示原始数据，只允许显示特定元素 */
-.player-item > *:not(.player-info):not(.player-tags) {
-  display: none !important;
-  visibility: hidden !important;
-}
-
-/* 修改选择器，确保不会隐藏玩家名称 */
-.player-item > *:not(.player-info):not(.player-tags):not(.player-name):not(.player-status):not(.player-tag) {
-  display: none !important;
-  visibility: hidden !important;
-  content: none !important; 
-}
-
-/* 不允许显示文本内容中的花括号，但不影响正常显示玩家名称 */
-.player-item *:not(.player-name):not(.player-status):not(.player-tag):not(.player-info) {
-  font-size: 0 !important;
-  color: transparent !important;
-}
-
-/* 禁止显示带有JSON格式的文本 */
-:not(.player-name):not(.player-status):not(.player-tag):-moz-any([textContent*='{']):not([class*='debug']),
-:not(.player-name):not(.player-status):not(.player-tag):-webkit-any([textContent*='{']):not([class*='debug']),
-*:not(.player-name):not(.player-status):not(.player-tag):-webkit-any(:contains('{')):not([class*='debug']) {
-  display: none !important;
-  visibility: hidden !important;
-}
-
 body {
-  font-family: 'Poppins', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   background-color: var(--background-color);
   color: var(--text-color);
   min-height: 100vh;
@@ -399,12 +226,64 @@ body {
   padding: 20px;
 }
 
+.app.app--mini {
+  /* 微应用容器按内容高度自适应，避免 100vh 与内边距叠加造成循环增高 */
+  min-height: auto;
+}
+
+.loading-error {
+  color: var(--danger-color);
+}
+
 .app-header {
+  position: relative;
   text-align: center;
-  margin-bottom: 30px;
+  margin-bottom: 24px;
   color: var(--primary-color);
   font-size: 2.5rem;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.rules-btn {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 6px 14px;
+  font-size: 0.9rem;
+  background: #fff;
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+  box-shadow: none;
+  text-shadow: none;
+}
+
+.rules-btn:hover {
+  transform: translateY(-50%);
+  background: #eef6fc;
+}
+
+.net-notice {
+  max-width: 560px;
+  margin: 12px auto 0;
+  color: #b9770e;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.conn-banner {
+  position: sticky;
+  top: 0;
+  z-index: 1500;
+  margin: 0 auto 12px;
+  max-width: 560px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #fff4e5;
+  color: #8a4b00;
+  border: 1px solid #f5c27a;
+  text-align: center;
+  font-size: 14px;
 }
 
 .app-content {
@@ -497,12 +376,17 @@ label {
 }
 
 @media (max-width: 768px) {
-  .app-header {
-    font-size: 2rem;
+  .app {
+    padding: 12px;
   }
-  
+
+  .app-header {
+    font-size: 1.6rem;
+    margin-bottom: 12px;
+  }
+
   .card {
-    padding: 20px;
+    padding: 16px;
   }
 }
 </style>

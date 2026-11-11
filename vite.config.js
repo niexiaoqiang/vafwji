@@ -10,6 +10,10 @@ export default defineConfig({
     vue(),
     vueDevTools(),
   ],
+  define: {
+    // 独立网页版；微应用构建见 vite.mini-app.config.js
+    __MINI_APP__: 'false',
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))

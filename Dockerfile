@@ -1,13 +1,14 @@
 # ================================
 # 第一阶段：构建环境
 # ================================
-FROM node:18-alpine AS builder
+FROM node:22-alpine AS builder
 
 # 设置工作目录
 WORKDIR /app
 
-# 复制依赖配置文件
+# 复制依赖配置文件（微应用 SDK 以本地目录依赖引入）
 COPY package*.json ./
+COPY vendor ./vendor
 
 # 安装所有依赖（包括开发依赖，用于构建前端）
 RUN npm ci
@@ -21,7 +22,7 @@ RUN npm run build
 # ================================
 # 第二阶段：生产运行环境
 # ================================
-FROM node:18-alpine AS runner
+FROM node:22-alpine AS runner
 
 # 设置生产环境变量
 ENV NODE_ENV=production
@@ -35,15 +36,18 @@ RUN adduser --system --uid 1001 nodeuser
 
 # 复制依赖配置文件
 COPY package*.json ./
+COPY vendor ./vendor
 
 # 仅安装生产依赖
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # 从构建阶段复制构建产物
 COPY --from=builder /app/dist ./dist
 
 # 复制服务器文件
 COPY server.js ./
+COPY server ./server
+COPY shared ./shared
 
 # 设置文件权限
 RUN chown -R nodeuser:nodejs /app
@@ -54,7 +58,7 @@ EXPOSE 3000
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
+  CMD node -e "require('http').get('http://localhost:3000/healthz', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
 
 # 启动应用
 CMD ["node", "server.js"]

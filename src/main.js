@@ -1,18 +1,27 @@
 import './assets/main.css'
 
 import { createApp } from 'vue'
-import { createPinia } from 'pinia'
 import App from './App.vue'
-import { io } from 'socket.io-client'
+import { isMiniApp } from './platform.js'
 
-const app = createApp(App)
+// 生产构建默认关闭调试日志（console.log / debug），警告和错误照常输出。
+// 排查问题时：网页版加 ?debug=1，或在控制台执行 localStorage.debug = '1' 后刷新。
+function debugEnabled() {
+  if (!import.meta.env.PROD) return true
+  if (isMiniApp) return false
+  try {
+    return new URLSearchParams(window.location.search).has('debug') || window.localStorage.getItem('debug') === '1'
+  } catch {
+    return false
+  }
+}
+if (!debugEnabled()) {
+  console.log = () => {}
+  console.debug = () => {}
+}
 
-// 创建全局socket实例
-const socket = io(window.location.hostname === 'localhost' ? 'http://localhost:3000' : `http://${window.location.hostname}:3000`)
+if (isMiniApp) {
+  document.documentElement.classList.add('mini-app')
+}
 
-// 将socket实例添加到全局属性
-app.config.globalProperties.$socket = socket
-
-app.use(createPinia())
-
-app.mount('#app')
+createApp(App).mount('#app')

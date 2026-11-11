@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test';
 
-// See here how to get started:
-// https://playwright.dev/docs/intro
-test('visits the app root url', async ({ page }) => {
+test('大厅可以开始人机对战', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('h1')).toHaveText('You did it!');
-})
+  await expect(page.locator('h1')).toHaveText('炸飞机');
+  await page.getByPlaceholder('输入你的昵称').fill('测试玩家');
+  await page.getByRole('button', { name: '开始人机对战' }).click();
+  await expect(page.getByRole('heading', { name: '人机对战' })).toBeVisible();
+});
