@@ -30,9 +30,17 @@
 
     <aside class="side">
       <section class="card room-card">
+        <div v-if="isPublic" class="match-status">
+          <h2>{{ players.length < 2 ? '正在寻找对手' : '已找到对手，准备出发' }}</h2>
+          <p class="muted" role="status">{{ players.length < 2 ? `已等待 ${waitingSeconds} 秒 · 可以先调整布局` : `双方准备后自动开局 · 准备剩余 ${prepareSeconds} 秒` }}</p>
+          <div class="match-actions">
+            <button class="btn btn-sm" :disabled="leaving" @click="leaveRoom">{{ leaving ? '取消中…' : '取消匹配' }}</button>
+            <button v-if="players.length < 2 && waitingSeconds >= 20" class="btn btn-sm" :disabled="leaving" @click="switchToAi">改玩人机</button>
+          </div>
+        </div>
         <div class="room-head">
           <div v-if="!isAi">
-            <span class="muted">房间号</span>
+            <span class="muted">{{ isPublic ? '公开房间' : '好友房间' }}</span>
             <b class="room-code">{{ roomId }}</b>
           </div>
           <div v-else>
@@ -41,7 +49,7 @@
           </div>
           <div class="room-head-actions">
             <button v-if="!isAi" type="button" class="btn btn-sm" @click="copyInvite">⧉ 复制邀请</button>
-            <button type="button" class="btn btn-danger btn-sm leave-sm" @click="leaveRoom">离开</button>
+            <button v-if="!isPublic" type="button" class="btn btn-danger btn-sm leave-sm" :disabled="leaving" @click="leaveRoom">离开</button>
           </div>
         </div>
         <ul class="players">
@@ -58,7 +66,7 @@
           </li>
           <li v-if="players.length < 2" class="waiting">
             <span class="avatar ghost">?</span>
-            <span class="muted">等待对手加入…把房间号发给朋友吧</span>
+            <span class="muted">{{ isPublic ? '正在等另一位飞行员加入…' : '等待好友加入…把房间号发给朋友吧' }}</span>
           </li>
         </ul>
       </section>
@@ -83,10 +91,10 @@
           <button class="btn btn-ghost" @click="clearPlanes" :disabled="isReady">清除</button>
           <button v-if="!isReady" class="btn btn-primary main-action" @click="ready" :disabled="planes.length < 3 || preparing">{{ preparing ? '提交中…' : isAi ? '准备并开始' : '准备' }}</button>
           <button v-else-if="phase === 'waiting'" class="btn main-action" :disabled="preparing || starting" @click="unready">重新布置</button>
-          <button v-if="!isAi && isLeader && canStartGame" class="btn btn-primary main-action" :disabled="starting" @click="startGame">开始游戏</button>
+          <button v-if="!isAi && !isPublic && isLeader && canStartGame" class="btn btn-primary main-action" :disabled="starting" @click="startGame">开始游戏</button>
         </div>
         <p class="setup-tip" v-if="isReady">{{ readyTip }}</p>
-        <button type="button" class="btn btn-danger btn-sm leave" @click="leaveRoom">离开房间</button>
+        <button v-if="!isPublic" type="button" class="btn btn-danger btn-sm leave" :disabled="leaving" @click="leaveRoom">离开房间</button>
       </section>
     </aside>
   </div>
@@ -94,7 +102,7 @@
 
 <script>
 import { notify } from '../ui/dialog.js';
-import { copyText } from '../platform.js';
+import { copyText, storage } from '../platform.js';
 import { buildPlane, randomPlanes, COLUMNS } from '../../shared/planes.js';
 import { LEVELS } from '../local/ai.js';
 
@@ -112,13 +120,19 @@ export default {
     mode: { type: String, default: 'online' },
     level: { type: String, default: 'normal' },
   },
-  emits: ['gameStart', 'leave'],
+  emits: ['gameStart', 'leave', 'startAi'],
   data() {
     return {
       columns: COLUMNS,
       players: this.initialState?.players || [],
       leaderId: this.initialState?.leaderId || null,
       phase: this.initialState?.phase || 'waiting',
+      visibility: this.initialState?.visibility || 'private',
+      waitingSince: this.initialState?.waitingSince || Date.now(),
+      prepareDeadline: this.initialState?.prepareDeadline || 0,
+      clockOffset: (this.initialState?.serverNow || Date.now()) - Date.now(),
+      now: Date.now(),
+      leaving: false,
       planes: (this.initialState?.ownPlanes?.length ? this.initialState.ownPlanes : randomPlanes()).map(withId),
       isReady: !!this.initialState?.players?.find((p) => p.id === this.socket.id)?.ready,
       preparing: false,
@@ -135,6 +149,9 @@ export default {
     };
   },
   computed: {
+    isPublic() { return !this.isAi && this.visibility === 'public'; },
+    waitingSeconds() { return Math.max(0, Math.floor((this.now + this.clockOffset - this.waitingSince) / 1000)); },
+    prepareSeconds() { return Math.max(0, Math.ceil((this.prepareDeadline - this.now - this.clockOffset) / 1000)); },
     isAi() {
       return this.mode === 'ai';
     },
@@ -153,6 +170,7 @@ export default {
     readyTip() {
       if (this.players.length < 2) return '已准备，等待对手加入';
       if (!this.canStartGame) return '已准备，等待对手准备';
+      if (this.isPublic) return '双方已准备，正在自动开局';
       return this.isLeader ? '双方都准备好了，点「开始游戏」' : '已准备，等待房主开始游戏';
     },
   },
@@ -162,6 +180,7 @@ export default {
     },
   },
   mounted() {
+    this.ticker = setInterval(() => { this.now = Date.now(); }, 1000);
     document.addEventListener('pointermove', this.onPointerMove);
     document.addEventListener('pointerup', this.onPointerUp);
     document.addEventListener('pointercancel', this.onPointerUp);
@@ -178,6 +197,7 @@ export default {
     this.socket.emit('syncRoom', {});
   },
   beforeUnmount() {
+    clearInterval(this.ticker);
     document.removeEventListener('pointermove', this.onPointerMove);
     document.removeEventListener('pointerup', this.onPointerUp);
     document.removeEventListener('pointercancel', this.onPointerUp);
@@ -207,9 +227,15 @@ export default {
       this.players = state.players || [];
       this.leaderId = state.leaderId;
       this.phase = state.phase;
+      this.visibility = state.visibility || 'private';
+      this.waitingSince = state.waitingSince || this.waitingSince;
+      this.prepareDeadline = state.prepareDeadline || 0;
+      this.now = Date.now();
+      this.clockOffset = (state.serverNow || this.now) - this.now;
       const me = this.players.find((p) => p.id === this.myId);
       // 服务端为准：重置后（比如对局结束回到房间）解除本地准备
-      if (me && !me.ready && this.isReady) this.isReady = false;
+      // 准备请求还在路上时不覆盖，避免棋盘被中途解锁、显示的布局和提交的不一致
+      if (me && !this.preparing) this.isReady = !!me.ready;
     },
     onGameError(data) {
       if (data?.code === 'ATTACK_REJECTED') return;
@@ -248,8 +274,23 @@ export default {
       });
     },
     leaveRoom() {
-      this.socket.emit('leaveRoom', {});
-      this.$emit('leave');
+      this.exitWaiting(false);
+    },
+    switchToAi() {
+      this.exitWaiting(true);
+    },
+    exitWaiting(toAi) {
+      if (this.leaving) return;
+      this.leaving = true;
+      const event = this.isPublic ? 'cancelMatch' : 'leaveRoom';
+      this.socket.emit(event, { roomId: this.roomId }, (res) => {
+        this.leaving = false;
+        // 断网或超时：先在本地离开，App 会在重连后补发离开请求
+        const offline = ['DISCONNECTED', 'TIMEOUT', 'SEND_FAILED'].includes(res?.code);
+        if (!res?.success && !offline) { notify(res?.message || '离开失败，请重试'); return; }
+        if (toAi) this.$emit('startAi', { username: this.username, level: storage.getItem('aiLevel') || 'normal' });
+        else this.$emit('leave');
+      });
     },
     async copyInvite() {
       try {
@@ -543,6 +584,11 @@ html[data-fx-dashed-grid] .board-cell {
   gap: 16px;
 }
 
+.match-status { padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--sk-line); }
+.match-status h2 { font-size: 18px; color: var(--sk-accent); margin-bottom: 6px; }
+.match-status p { font-size: 13px; }
+.match-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
 .room-head {
   display: flex;
   align-items: center;
@@ -767,9 +813,15 @@ kbd {
   }
 
   .players li {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
     padding: 7px 9px;
     font-size: 13px;
   }
+
+  .players li > .chip { grid-column: 2; justify-self: start; }
+  .player-name { display: block; }
+  .player-name .chip { display: none; }
 
   .player-name .muted {
     display: none;

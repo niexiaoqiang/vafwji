@@ -42,6 +42,7 @@
         :level="aiLevel"
         @gameStart="onGameStart"
         @leave="backToLobby"
+        @startAi="onStartAi"
       />
       <GameView
         v-else-if="view === 'game'"
@@ -148,9 +149,20 @@ export default {
       this.netSocket.on('disconnect', () => {
         this.connectionLost = true;
       });
+      this.netSocket.on('matchCancelled', (data) => {
+        if (this.mode === 'online' && (!this.roomId || this.roomId === data.roomId)) {
+          notify(data.message);
+          this.backToLobby();
+        }
+      });
       this.netSocket.on('reconnect', () => {
         this.connectionLost = false;
         if (this.mode === 'online' && this.view !== 'lobby') notify('已重新连接');
+        if (this.pendingLeave) {
+          this.pendingLeave = false;
+          this.netSocket.emit('leaveRoom', {});
+          return;
+        }
         this.restoreSession();
       });
       // 重连成功但原会话已过期：服务器已判定离开，回到大厅
@@ -164,7 +176,11 @@ export default {
     },
     restoreSession() {
       this.netSocket.emit('syncRoom', {}, (res) => {
-        if (!res?.success || this.mode !== 'online') return;
+        if (this.mode !== 'online') return;
+        if (!res?.success) {
+          if (this.view === 'room' && !res?.code) this.backToLobby();
+          return;
+        }
         const me = res.state.players.find((p) => p.id === this.netSocket.id);
         this.roomId = res.roomId;
         this.username = me?.username || this.username;
@@ -182,6 +198,8 @@ export default {
       this.openRoom(roomId, username, state);
     },
     onStartAi({ username, level }) {
+      // 从联机房间（断网时）直接改玩人机，同样要在重连后补发离开
+      if (this.mode === 'online' && this.roomId && !this.netSocket?.connected) this.pendingLeave = true;
       this.localSession?.close();
       this.localSession = createLocalSession({ level });
       this.localSocket = markRaw(this.localSession.socket);
@@ -212,6 +230,8 @@ export default {
       this.openRoom(roomId || this.roomId, this.username, state);
     },
     backToLobby() {
+      // 联机时断网回到大厅：服务端还不知道我们离开了，重连后补发离开，而不是把人拉回旧房间
+      if (this.mode === 'online' && this.roomId && !this.netSocket?.connected) this.pendingLeave = true;
       if (this.mode === 'ai') {
         this.localSession?.close();
         this.localSession = null;

@@ -6,13 +6,25 @@
         <input v-model.trim="username" class="input name-input" maxlength="20" placeholder="输入你的昵称" />
       </label>
       <span class="muted greeting-tip">对局中会显示给对手</span>
+      <span class="chip" :class="{ 'chip-success': connected }" title="按当前连接统计，多个窗口可能重复计数" role="status">{{ connected ? `在线 ${online}` : '联机连接中' }}</span>
     </div>
 
     <div class="modes">
+      <section class="card hero hero-quick">
+        <div class="hero-text">
+          <span class="chip chip-accent">真人对战</span>
+          <h2>快速游戏</h2>
+          <p class="muted">一键找对手，双方准备后自动开局</p>
+        </div>
+        <p class="quick-availability">{{ connected ? (rooms.length ? `${rooms.length} 个公开房间正在等你` : '成为第一位等待的飞行员') : '连接成功后即可匹配' }}</p>
+        <p class="muted">等待时也能布置飞机，随时取消。找不到对手可切换人机练习。</p>
+        <button type="button" class="btn btn-primary btn-lg btn-block start-quick" :disabled="!canOnline" @click="quickMatch">{{ busy ? '正在处理…' : '开始快速游戏' }}</button>
+        <p v-if="!connected" class="net-state">{{ netNotice || '正在连接游戏服务器…可以先玩人机练习' }}</p>
+      </section>
       <!-- 人机对战 -->
       <section class="card hero hero-ai">
         <div class="hero-text">
-          <h2>快速开始</h2>
+          <h2>人机练习</h2>
           <p class="muted">和电脑对战，不用等人，随时练手</p>
         </div>
         <div class="seg level-seg" role="group" aria-label="难度">
@@ -24,14 +36,14 @@
             @click="aiLevel = level"
           >{{ info.label }}<small>{{ levelHints[level] }}</small></button>
         </div>
-        <button type="button" class="btn btn-primary btn-lg btn-block start-ai" :disabled="!username" @click="startAi">▶ 开始人机对战</button>
+        <button type="button" class="btn btn-lg btn-block start-ai" :disabled="!username || busy" @click="startAi">▶ 开始人机对战</button>
       </section>
 
       <!-- 联机对战 -->
       <section class="card hero hero-online">
         <div class="hero-text">
           <h2>好友对战</h2>
-          <p class="muted">建个房间，把房间号发给朋友</p>
+          <p class="muted">不在大厅展示，仅凭房间号加入</p>
         </div>
         <p v-if="!connected" class="net-state">{{ netNotice || '正在连接游戏服务器…' }}</p>
         <div class="row create-row">
@@ -43,22 +55,28 @@
           <button type="button" class="btn" :disabled="!canOnline || !joinId" @click="joinRoom()">加入</button>
         </div>
 
-        <div class="rooms">
-          <div class="rooms-head">
-            <span class="muted">等待对手的房间</span>
-            <button type="button" class="btn btn-ghost btn-sm" :disabled="!connected" @click="refreshRooms">刷新</button>
-          </div>
-          <p v-if="rooms.length === 0" class="muted empty">暂时没有，创建一个等朋友来吧</p>
-          <ul v-else>
-            <li v-for="room in rooms" :key="room.id">
-              <b class="room-id">{{ room.id }}</b>
-              <span class="chip chip-success">{{ room.players }}/2 等待中</span>
-              <button type="button" class="btn btn-sm" :disabled="!canOnline" @click="joinRoom(room.id)">加入房间</button>
-            </li>
-          </ul>
-        </div>
       </section>
     </div>
+
+    <section class="card rooms public-rooms" aria-label="公开游戏大厅">
+      <div class="rooms-head">
+        <div><h2>公开游戏大厅</h2><p class="muted">选一位对手加入，双方准备后自动开局</p></div>
+        <button type="button" class="btn btn-ghost btn-sm" :disabled="!connected" @click="refreshRooms">刷新</button>
+      </div>
+      <p v-if="!connected" class="muted empty">连接恢复后显示可加入的房间</p>
+      <div v-else-if="rooms.length === 0" class="empty">
+        <p>暂时没有等待中的公开房间</p>
+        <p class="muted">点「开始快速游戏」创建一个，或直接邀请朋友。</p>
+      </div>
+      <ul v-else>
+        <li v-for="room in rooms" :key="room.id">
+          <div class="room-owner"><b>{{ room.host }}</b><span class="muted room-id">{{ room.id }}</span></div>
+          <span class="chip" :class="{ 'chip-success': room.ready }">{{ room.ready ? '已准备' : '布阵中' }} · {{ room.players }}/2</span>
+          <span class="muted room-wait">等待 {{ waitLabel(room) }}</span>
+          <button type="button" class="btn btn-sm" :disabled="!canOnline" @click="joinRoom(room.id)">加入房间</button>
+        </li>
+      </ul>
+    </section>
 
     <section class="stats" aria-label="我的战绩">
       <div class="card stat"><b>{{ stats.online.win }}</b><span>联机胜</span></div>
@@ -92,6 +110,8 @@ export default {
       createId: '',
       joinId: '',
       rooms: [],
+      online: 0,
+      now: Date.now(),
       connected: !!this.socket?.connected,
       busy: false,
       aiLevel: storage.getItem('aiLevel') || 'normal',
@@ -128,23 +148,40 @@ export default {
     },
   },
   async mounted() {
+    this.ticker = setInterval(() => { this.now = Date.now(); }, 1000);
     this.listeners = {
       connect: () => this.onConnected(),
       reconnect: () => this.onConnected(),
       disconnect: () => {
         this.connected = false;
+        this.rooms = [];
       },
       roomsList: (list) => {
-        this.rooms = Array.isArray(list) ? list : [];
+        this.rooms = Array.isArray(list) ? list.map((room) => ({ ...room, receivedAt: Date.now() })) : [];
       },
+      lobbyInfo: (info) => { this.online = info.online || 0; },
     };
     this.attach(this.socket);
     this.stats = await loadStats();
   },
   beforeUnmount() {
+    clearInterval(this.ticker);
     this.detach(this.socket);
   },
   methods: {
+    waitLabel(room) {
+      const seconds = Math.max(0, Math.floor(((room.serverNow - room.waitingSince) + (this.now - room.receivedAt)) / 1000));
+      return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+    },
+    quickMatch() {
+      if (!this.canOnline) return;
+      this.busy = true;
+      this.socket.emit('quickMatch', { username: this.username }, (res) => {
+        this.busy = false;
+        if (!res?.success) { notify(res?.message || '匹配失败，请重试'); return; }
+        this.$emit('enter', { roomId: res.roomId, username: this.username, state: { ...res.state, ownPlanes: res.ownPlanes } });
+      });
+    },
     attach(socket) {
       if (!socket) return;
       for (const [event, handler] of Object.entries(this.listeners)) socket.on(event, handler);
@@ -162,13 +199,13 @@ export default {
       this.socket?.emit('listRooms', {});
     },
     startAi() {
-      if (!this.username) return;
+      if (!this.username || this.busy) return;
       this.$emit('startAi', { username: this.username, level: this.aiLevel });
     },
     createRoom() {
       if (!this.canOnline) return;
       this.busy = true;
-      this.socket.emit('createRoom', { username: this.username, roomId: this.createId }, (res) => {
+      this.socket.emit('createRoom', { username: this.username, roomId: this.createId, visibility: 'private' }, (res) => {
         this.busy = false;
         if (!res?.success) {
           notify(res?.message || '创建房间失败');
@@ -221,12 +258,13 @@ export default {
 
 .modes {
   display: grid;
-  grid-template-columns: 1.05fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
   align-items: stretch;
 }
 
 .hero {
+  min-width: 0;
   position: relative;
   overflow: hidden;
   display: flex;
@@ -245,6 +283,14 @@ export default {
   font-size: 26px;
   font-weight: 900;
 }
+
+.hero-quick h2 { margin-top: 10px; }
+.quick-availability { font-weight: 700; color: var(--sk-accent); }
+.public-rooms { padding: 20px; }
+.public-rooms h2 { font-size: 20px; margin-bottom: 4px; }
+.public-rooms .muted { font-size: 13px; }
+.room-owner { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.room-wait { white-space: nowrap; }
 
 /* 雷达特效：卡片右上角的雷达圈 */
 html[data-fx-radar] .hero::after {
@@ -275,7 +321,8 @@ html[data-fx-paper] .hero::after {
   pointer-events: none;
 }
 
-.start-ai {
+.start-ai,
+.start-quick {
   margin-top: auto;
 }
 
@@ -369,6 +416,10 @@ html[data-fx-paper] .hero::after {
 }
 
 @media (max-width: 760px) {
+  .public-rooms { padding: 16px; }
+  .rooms li { flex-wrap: wrap; gap: 8px; }
+  .room-owner { flex: 1 0 45%; }
+  .room-wait { flex: 1; }
   .lobby {
     gap: 12px;
   }
