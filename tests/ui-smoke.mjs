@@ -68,9 +68,12 @@ try {
   await shooter.locator('button[aria-label="A1"]').click();
   await shooter.getByRole('button', { name: '攻击 A1', exact: true }).click();
   await expect(shooter.locator('button[aria-label="A1"]')).toHaveClass(/cell-(miss|hit|sink)/);
-  const shotClass = await shooter.locator('button[aria-label="A1"]').getAttribute('class');
+  // fx-* 是短暂的受击动效 class，比较刷新前后的格子状态时忽略
+  const stableClass = async () => (await shooter.locator('button[aria-label="A1"]').getAttribute('class'))
+    .split(/\s+/).filter((c) => c && !c.startsWith('fx-')).join(' ');
+  const shotClass = await stableClass();
   await shooter.reload();
-  await expect(shooter.locator('button[aria-label="A1"]')).toHaveAttribute('class', shotClass);
+  await expect.poll(stableClass).toBe(shotClass);
   await quit(shooter);
   await expect(other.locator('.game-result h2')).toHaveText('你赢了！');
   assert.equal((await stats(shooter)).online.lose, 1);

@@ -30,13 +30,19 @@
 
     <aside class="side">
       <section class="card room-card">
-        <div v-if="isPublic" class="match-status">
-          <h2>{{ players.length < 2 ? '正在寻找对手' : '已找到对手，准备出发' }}</h2>
-          <p class="muted" role="status">{{ players.length < 2 ? `已等待 ${waitingSeconds} 秒 · 可以先调整布局` : `双方准备后自动开局 · 准备剩余 ${prepareSeconds} 秒` }}</p>
-          <div class="match-actions">
-            <button class="btn btn-sm" :disabled="leaving" @click="leaveRoom">{{ leaving ? '取消中…' : '取消匹配' }}</button>
-            <button v-if="players.length < 2 && waitingSeconds >= 20" class="btn btn-sm" :disabled="leaving" @click="switchToAi">改玩人机</button>
+        <div v-if="isPublic" class="match-status" :class="{ found: players.length >= 2 }">
+          <div class="match-top">
+            <span class="radar" aria-hidden="true"></span>
+            <div class="match-text">
+              <h2>{{ players.length < 2 ? '正在寻找对手' : '已找到对手，准备出发' }}</h2>
+              <p class="match-clock" role="status">{{ players.length < 2 ? `已等待 ${clock(waitingSeconds)}` : `准备剩余 ${prepareSeconds} 秒` }}</p>
+            </div>
           </div>
+          <div class="match-actions">
+            <button class="btn btn-cancel" :disabled="leaving" @click="leaveRoom"><span aria-hidden="true">✕</span>{{ leaving ? '取消中…' : '取消匹配' }}</button>
+            <button v-if="players.length < 2 && waitingSeconds >= 20" class="btn" :disabled="leaving" @click="switchToAi"><span aria-hidden="true">🤖</span>改玩人机</button>
+          </div>
+          <p class="muted match-tip">{{ players.length < 2 ? '等待时可以先布置飞机，匹配成功后不用重新准备' : '双方准备后自动开局' }}</p>
         </div>
         <div class="room-head">
           <div v-if="!isAi">
@@ -94,6 +100,11 @@
           <button v-if="!isAi && !isPublic && isLeader && canStartGame" class="btn btn-primary main-action" :disabled="starting" @click="startGame">开始游戏</button>
         </div>
         <p class="setup-tip" v-if="isReady">{{ readyTip }}</p>
+        <!-- 手机上匹配卡片在页面顶部，取消按钮固定放在底部操作栏 -->
+        <div v-if="isPublic" class="cancel-dock">
+          <button type="button" class="btn btn-cancel" :disabled="leaving" @click="leaveRoom"><span aria-hidden="true">✕</span>{{ leaving ? '取消中…' : '取消匹配' }}</button>
+          <button v-if="players.length < 2 && waitingSeconds >= 20" type="button" class="btn" :disabled="leaving" @click="switchToAi"><span aria-hidden="true">🤖</span>改玩人机</button>
+        </div>
         <button v-if="!isPublic" type="button" class="btn btn-danger btn-sm leave" :disabled="leaving" @click="leaveRoom">离开房间</button>
       </section>
     </aside>
@@ -291,6 +302,9 @@ export default {
         if (toAi) this.$emit('startAi', { username: this.username, level: storage.getItem('aiLevel') || 'normal' });
         else this.$emit('leave');
       });
+    },
+    clock(seconds) {
+      return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
     },
     async copyInvite() {
       try {
@@ -584,10 +598,71 @@ html[data-fx-dashed-grid] .board-cell {
   gap: 16px;
 }
 
-.match-status { padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--sk-line); }
-.match-status h2 { font-size: 18px; color: var(--sk-accent); margin-bottom: 6px; }
-.match-status p { font-size: 13px; }
-.match-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+/* 匹配中卡片：雷达动画 + 计时 + 醒目的取消按钮 */
+.match-status {
+  margin: -6px -6px 16px;
+  padding: 16px;
+  border: 1.5px solid color-mix(in srgb, var(--sk-accent) 55%, transparent);
+  border-radius: var(--sk-radius-sm);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--sk-accent) 14%, var(--sk-surface)), var(--sk-surface) 75%);
+}
+
+.match-top { display: flex; align-items: center; gap: 14px; }
+.match-text { min-width: 0; }
+.match-status h2 { font-size: 17px; font-weight: 800; }
+.match-clock { margin-top: 2px; color: var(--sk-accent); font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }
+
+.radar {
+  position: relative;
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--sk-accent) 45%, transparent);
+  background: radial-gradient(circle, transparent 36%, color-mix(in srgb, var(--sk-accent) 22%, transparent) 37%, transparent 41%);
+}
+
+.radar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, color-mix(in srgb, var(--sk-accent) 50%, transparent), transparent 30%);
+  animation: radar-spin 1.8s linear infinite;
+}
+
+.radar::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px;
+  border-radius: 50%;
+  background: var(--sk-accent);
+}
+
+/* 找到对手后雷达停转 */
+.match-status.found .radar::after { animation: none; opacity: 0.35; }
+
+@keyframes radar-spin { to { transform: rotate(360deg); } }
+
+.match-actions { display: flex; gap: 8px; margin-top: 14px; }
+.match-actions .btn { flex: 1; min-height: 42px; }
+.match-tip { margin-top: 10px; }
+
+.btn-cancel {
+  background: transparent;
+  border: 1.5px solid color-mix(in srgb, var(--sk-danger) 70%, transparent);
+  color: var(--sk-danger);
+}
+
+@media (hover: hover) {
+  .btn-cancel:hover:not(:disabled) { background: color-mix(in srgb, var(--sk-danger) 12%, transparent); }
+}
+
+.cancel-dock { display: none; }
 
 .room-head {
   display: flex;
@@ -746,6 +821,16 @@ kbd {
 }
 
 @media (max-width: 900px) {
+  /* 手机：顶部卡片只显示状态，取消按钮放进吸底操作栏 */
+  .match-status { margin: -2px -2px 10px; padding: 10px 12px; }
+  .match-status .match-actions,
+  .match-status .match-tip { display: none; }
+  .radar { width: 34px; height: 34px; }
+  .match-status h2 { font-size: 15px; }
+  .match-clock { font-size: 15px; }
+  .cancel-dock { display: flex; gap: 6px; margin-top: 8px; }
+  .cancel-dock .btn { flex: 1; min-height: 40px; }
+
   .room-view {
     grid-template-columns: 1fr;
     gap: 12px;

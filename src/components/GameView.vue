@@ -1,5 +1,10 @@
 <template>
   <div class="game-view">
+    <!-- 受击反馈：边缘泛红、击落横幅（只做提示，不挡操作） -->
+    <div v-if="vignette" :key="'v' + vignette" class="fx-vignette" :class="{ strong: vignetteStrong }" aria-hidden="true"></div>
+    <div v-if="banner" :key="'b' + banner.id" class="fx-banner" :class="banner.kind" role="status">
+      {{ banner.text }}<small v-if="banner.sub">{{ banner.sub }}</small>
+    </div>
     <!-- 状态栏：回合、倒计时、双方剩余飞机 -->
     <section class="card game-status" :class="{ 'is-my-turn': isYourTurn && !gameOver, over: gameOver }">
       <div class="status-text">{{ statusMessage }}</div>
@@ -25,7 +30,7 @@
       <button type="button" role="tab" :class="{ on: activeTab === 'enemy' }" :aria-selected="activeTab === 'enemy'" @click="activeTab = 'enemy'">
         对方棋盘<span v-if="isYourTurn && !gameOver" class="tab-dot"></span>
       </button>
-      <button type="button" role="tab" :class="{ on: activeTab === 'mine' }" :aria-selected="activeTab === 'mine'" @click="activeTab = 'mine'">
+      <button type="button" role="tab" :class="{ on: activeTab === 'mine', 'fx-tab-alert': tabAlert }" :aria-selected="activeTab === 'mine'" @click="activeTab = 'mine'">
         我的棋盘<span v-if="unseenHits > 0" class="tab-badge">{{ unseenHits }}</span>
       </button>
     </div>
@@ -198,6 +203,12 @@ export default {
       currentTurn: null,
       turnDeadline: null,
       turnTotal: 0,
+      fxEnemy: {},        // 对方棋盘格子的临时动效 class
+      fxMine: {},         // 我的棋盘格子的临时动效 class
+      banner: null,
+      vignette: 0,
+      vignetteStrong: false,
+      tabAlert: false,
       miniCells: MINI_CELLS,
       now: Date.now(),
       myShots: {},        // 我对对方的攻击：key -> pending | miss | hit | sink
@@ -353,6 +364,8 @@ export default {
     if (this.gameData) this.onGameStart(this.gameData);
   },
   beforeUnmount() {
+    clearTimeout(this.bannerTimer);
+    clearTimeout(this.tabAlertTimer);
     clearInterval(this.ticker);
     clearTimeout(this.pendingTimer);
     for (const [event, handler] of Object.entries(this.listeners || {})) this.socket.off(event, handler);
@@ -378,7 +391,10 @@ export default {
       const first = this.players.find((p) => p.id === this.currentTurn);
       this.addLog(`对局开始：${this.me.username || '我'} vs ${this.enemyName}，${first?.id === this.myId ? '你' : first?.username || '对方'}先手`, 'system');
       this.opponentOffline = !!this.enemy.offline;
+      // 刷新恢复时重放历史记录，不播放动效
+      this.replaying = true;
       for (const event of data.history || []) this.onAttackResult(event);
+      this.replaying = false;
       if (data.result) this.onGameOver(data.result);
     },
     onTurnChange(data) {
@@ -429,6 +445,79 @@ export default {
         if (data.result !== 'miss' && this.activeTab !== 'mine') this.unseenHits += 1;
         this.lastAutoMessage = data.auto ? `${this.enemyName} 超时，系统代其攻击了 ${label}` : '';
         this.addLog(`${data.auto ? '（超时代打）' : ''}攻击 ${label}：${resultText}`, data.result === 'miss' ? 'info' : 'danger', 'op');
+      }
+      if (!this.replaying) this.playFx(data);
+    },
+
+    // ---------- 受击反馈 ----------
+    playFx(data) {
+      const k = key(data.position?.row, data.position?.col);
+      const mine = data.attacker === this.myId;
+      if (mine) {
+        if (data.result === 'miss') return this.flashCells('fxEnemy', [k], 'fx-pop');
+        this.flashCells('fxEnemy', [k], 'fx-pop fx-ring');
+        if (data.result === 'sink') {
+          const rest = (data.sunkPlane || []).map((c) => key(c.row, c.col)).filter((x) => x !== k);
+          this.flashCells('fxEnemy', rest, 'fx-reveal');
+          this.showBanner('击落！', '可以继续攻击', 'good');
+          this.vibrate(40);
+        } else {
+          this.vibrate(20);
+        }
+        return;
+      }
+      if (data.result === 'miss') return this.flashCells('fxMine', [k], 'fx-pop');
+      if (data.result === 'sink') {
+        const plane = this.me.planes?.[data.planeIndex];
+        const cells = (plane?.coordinates || []).map((c) => key(c.row, c.col));
+        this.flashCells('fxMine', cells.length ? cells : [k], 'fx-flash');
+        this.showBanner(`${['一', '二', '三'][data.planeIndex] || ''}号机被击落`, '', 'bad');
+        this.showVignette(true);
+        this.vibrate([60, 40, 60]);
+      } else {
+        this.flashCells('fxMine', [k], 'fx-flash fx-ring-bad');
+        // 只有自己知道是哪架飞机被打中（服务端不会透露给攻击方）
+        const index = this.myPlaneCells[k]?.planeIndex;
+        const name = index === undefined ? '飞机' : `${['一', '二', '三'][index]}号机`;
+        this.showBanner(`${name}中弹`, `${data.position.col}${data.position.row} 被命中`, 'hit');
+        this.showVignette(false);
+        this.vibrate(40);
+      }
+      if (this.activeTab !== 'mine') {
+        this.tabAlert = false;
+        this.$nextTick(() => { this.tabAlert = true; });
+        clearTimeout(this.tabAlertTimer);
+        this.tabAlertTimer = setTimeout(() => { this.tabAlert = false; }, 2000);
+      }
+    },
+    flashCells(field, keys, cls) {
+      if (!keys.length) return;
+      const next = { ...this[field] };
+      keys.forEach((k) => { next[k] = cls; });
+      this[field] = next;
+      setTimeout(() => {
+        const after = { ...this[field] };
+        keys.forEach((k) => { if (after[k] === cls) delete after[k]; });
+        this[field] = after;
+      }, 900);
+    },
+    showBanner(text, sub, kind) {
+      this.banner = { id: Date.now(), text, sub, kind };
+      clearTimeout(this.bannerTimer);
+      this.bannerTimer = setTimeout(() => { this.banner = null; }, 1300);
+    },
+    showVignette(strong) {
+      this.vignetteStrong = strong;
+      this.vignette += 1;
+      const id = this.vignette;
+      setTimeout(() => { if (this.vignette === id) this.vignette = 0; }, 1000);
+    },
+    // 手机轻震：只在触屏设备上，浏览器或微应用不支持时静默跳过
+    vibrate(pattern) {
+      try {
+        if (window.matchMedia?.('(pointer: coarse)').matches) navigator.vibrate?.(pattern);
+      } catch {
+        // 忽略
       }
     },
     onGameOver(data) {
@@ -565,6 +654,7 @@ export default {
       const k = key(row, col);
       const shot = this.myShots[k];
       const classes = [];
+      if (this.fxEnemy[k]) classes.push(this.fxEnemy[k]);
       if (this.selectedTarget?.row === row && this.selectedTarget?.col === col) classes.push('cell-selected-target');
       if (this.lastAttack?.attacker === this.myId && this.lastAttack.row === row && this.lastAttack.col === col) classes.push('cell-latest');
       if (shot) classes.push(`cell-${shot}`);
@@ -589,6 +679,7 @@ export default {
       const k = key(row, col);
       const cell = this.myPlaneCells[k];
       const classes = [];
+      if (this.fxMine[k]) classes.push(this.fxMine[k]);
       if (this.lastAttack && this.lastAttack.attacker !== this.myId && this.lastAttack.row === row && this.lastAttack.col === col) classes.push('cell-latest');
       if (cell) {
         classes.push('cell-plane', `pi-${cell.planeIndex}`);
@@ -1303,6 +1394,139 @@ html[data-fx-glow] .game-result.win .result-hero h2 {
   justify-content: center;
   gap: 10px;
   padding: 12px;
+}
+
+/* ---------- 受击反馈（克制版） ---------- */
+.fx-pop {
+  z-index: 2;
+  animation: fx-pop 0.35s ease-out;
+}
+
+/* 冲击环用 box-shadow 扩散，不占用格子的伪元素 */
+.fx-ring {
+  animation: fx-pop 0.35s ease-out, fx-ring 0.6s ease-out;
+}
+
+.fx-ring-bad {
+  animation: fx-flash 0.8s ease-out, fx-ring-bad 0.6s ease-out;
+}
+
+.fx-reveal {
+  animation: fx-reveal 0.6s ease-out;
+}
+
+.fx-flash {
+  z-index: 2;
+  animation: fx-flash 0.8s ease-out;
+}
+
+.fx-vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  pointer-events: none;
+  animation: fx-vignette 0.7s ease-out forwards;
+}
+
+.fx-vignette.strong {
+  animation: fx-vignette-strong 1s ease-out forwards;
+}
+
+.fx-banner {
+  position: fixed;
+  left: 50%;
+  top: 22%;
+  z-index: 950;
+  display: grid;
+  justify-items: center;
+  padding: 10px 22px;
+  border-radius: 999px;
+  font-family: var(--sk-font-title);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: fx-banner 1.3s ease forwards;
+}
+
+.fx-banner small {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  opacity: 0.85;
+}
+
+.fx-banner.good {
+  background: var(--sk-accent);
+  color: var(--sk-accent-ink);
+  box-shadow: var(--sk-glow);
+}
+
+.fx-banner.bad {
+  background: var(--sk-danger);
+  color: #fff;
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--sk-danger) 40%, transparent);
+}
+
+.fx-banner.hit {
+  padding: 8px 18px;
+  border: 1.5px solid var(--sk-danger);
+  background: var(--sk-surface);
+  color: var(--sk-danger);
+  font-size: 17px;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--sk-danger) 25%, transparent);
+}
+
+.fx-tab-alert {
+  animation: fx-tab 0.9s ease-in-out 2;
+}
+
+@keyframes fx-pop {
+  0% { transform: scale(0.6); }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+@keyframes fx-ring {
+  from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sk-hit) 70%, transparent); }
+  to { box-shadow: 0 0 0 10px transparent; }
+}
+
+@keyframes fx-ring-bad {
+  from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sk-danger) 70%, transparent); }
+  to { box-shadow: 0 0 0 10px transparent; }
+}
+
+@keyframes fx-reveal {
+  0% { background: var(--sk-sink); }
+  100% { background: var(--sk-wreck); }
+}
+
+@keyframes fx-flash {
+  0%, 25% { background: color-mix(in srgb, var(--sk-danger) 75%, var(--cell-bg)); }
+  100% { }
+}
+
+@keyframes fx-vignette {
+  from { box-shadow: inset 0 0 60px 10px color-mix(in srgb, var(--sk-danger) 35%, transparent); }
+  to { box-shadow: inset 0 0 0 0 transparent; }
+}
+
+@keyframes fx-vignette-strong {
+  from { box-shadow: inset 0 0 90px 20px color-mix(in srgb, var(--sk-danger) 50%, transparent); }
+  to { box-shadow: inset 0 0 0 0 transparent; }
+}
+
+@keyframes fx-banner {
+  0% { opacity: 0; transform: translate(-50%, 8px) scale(0.92); }
+  15% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -6px); }
+}
+
+@keyframes fx-tab {
+  50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--sk-danger) 55%, transparent); }
 }
 
 @keyframes ping {
