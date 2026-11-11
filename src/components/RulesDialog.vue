@@ -31,7 +31,7 @@
         <li>断线后 45 秒内重连可以继续对局。</li>
       </ul>
 
-      <button type="button" class="btn-primary close" @click="$emit('close')">知道了</button>
+      <button type="button" class="btn btn-primary close" @click="$emit('close')">知道了</button>
     </div>
   </div>
 </template>
@@ -61,36 +61,36 @@ export default {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgba(15, 23, 42, 0.5);
+  background: var(--sk-overlay);
 }
 
 .rules {
-  width: min(100%, 460px);
+  width: min(100%, 480px);
   max-height: calc(100vh - 32px);
   overflow-y: auto;
-  background: #fff;
-  border-radius: 14px;
-  padding: 20px;
-  color: var(--text-color);
-  text-align: left;
+  padding: 22px;
+  border: 1px solid var(--sk-line);
+  border-radius: var(--sk-radius);
+  background: var(--sk-surface);
+  color: var(--sk-text);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
 }
 
 h2 {
-  font-size: 1.3rem;
+  font-size: 20px;
   margin-bottom: 8px;
-  color: var(--primary-color);
-  text-shadow: none;
+  color: var(--sk-accent);
 }
 
 h3 {
-  font-size: 1rem;
-  margin: 14px 0 6px;
+  font-size: 15px;
+  margin: 16px 0 6px;
 }
 
 p,
 li {
-  font-size: 0.92rem;
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 ul {
@@ -99,32 +99,43 @@ ul {
 
 .plane-demo {
   display: grid;
-  grid-template-columns: repeat(5, 18px);
+  grid-template-columns: repeat(5, 20px);
   gap: 2px;
   margin: 4px 0 8px;
 }
 
 .plane-demo span {
-  width: 18px;
-  height: 18px;
-  border-radius: 3px;
-  background: #f2f4f7;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--sk-mine-cell);
+  border: 1px solid var(--sk-mine-line);
 }
 
 .plane-demo .on {
-  background: #aed6f1;
+  background: color-mix(in srgb, var(--sk-plane-1) 55%, var(--sk-mine-cell));
 }
 
 .plane-demo .head {
-  background: #3498db;
+  display: grid;
+  place-items: center;
+  background: var(--sk-plane-1);
 }
 
-.miss { color: #90a4ae; }
-.hit { color: var(--danger-color); }
-.sink { color: #1f2d3d; }
+.plane-demo .head::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sk-head-dot);
+}
+
+.miss { color: var(--sk-miss); }
+.hit { color: var(--sk-hit); }
+.sink { color: var(--sk-sink); }
 
 .close {
   width: 100%;
-  margin-top: 16px;
+  margin-top: 18px;
 }
 </style>

@@ -1,81 +1,94 @@
 <template>
   <div class="room-view">
-    <div class="card room-info">
-      <h2>{{ isAi ? '人机对战' : '房间信息' }}</h2>
-      <div v-if="!isAi" class="info-row">
-        <span class="info-label">房间号</span>
-        <span class="info-value">{{ roomId }}</span>
-        <button class="copy-btn" @click="copyInvite">复制邀请</button>
+    <section class="card board-card">
+      <div class="board-head">
+        <h2>布置你的飞机</h2>
+        <p class="muted">
+          {{ isReady ? '已提交布局，取消准备后才能再调整' : '拖动飞机调整位置；点一下选中后可以旋转（电脑上也可右键旋转）' }}
+        </p>
       </div>
-      <div class="info-row">
-        <span class="info-label">玩家</span>
-        <span class="info-value">{{ players.length }}/2</span>
+      <div class="board">
+        <div class="board-col-labels"><span v-for="col in columns" :key="'col-' + col">{{ col }}</span></div>
+        <div class="board-row-labels"><span v-for="i in 10" :key="'row-' + i">{{ i }}</span></div>
+        <div class="board-grid" :class="{ locked: isReady }">
+          <div v-for="row in 10" :key="'r' + row" class="board-row">
+            <div
+              v-for="col in columns"
+              :key="'c' + col"
+              class="board-cell"
+              :class="getCellClass(row, col)"
+              :data-row="row"
+              :data-col="col"
+              @contextmenu.prevent="handleRightClick(row, col)"
+              @pointerdown="handleCellPointerDown($event, row, col)"
+            ></div>
+          </div>
+        </div>
       </div>
-      <div class="players-list">
-        <div v-for="player in players" :key="player.id" class="player-item">
-          <div class="player-info">
-            <span class="player-name">{{ player.username }}</span>
-            <span class="player-status" :class="{ ready: player.ready }">
-              {{ player.offline ? '掉线中' : player.ready ? '已准备' : '未准备' }}
+      <p class="muted board-foot">三种颜色代表三架飞机，带圆点的格子是机头</p>
+    </section>
+
+    <aside class="side">
+      <section class="card room-card">
+        <div class="room-head">
+          <div v-if="!isAi">
+            <span class="muted">房间号</span>
+            <b class="room-code">{{ roomId }}</b>
+          </div>
+          <div v-else>
+            <span class="muted">人机对战</span>
+            <b class="room-mode">{{ levelLabel }}难度</b>
+          </div>
+          <div class="room-head-actions">
+            <button v-if="!isAi" type="button" class="btn btn-sm" @click="copyInvite">⧉ 复制邀请</button>
+            <button type="button" class="btn btn-danger btn-sm leave-sm" @click="leaveRoom">离开</button>
+          </div>
+        </div>
+        <ul class="players">
+          <li v-for="player in players" :key="player.id">
+            <span class="avatar" :class="{ me: player.id === myId }">{{ (player.username || '?').slice(0, 1) }}</span>
+            <span class="player-name">
+              {{ player.username }}
+              <span v-if="player.id === myId" class="muted">（我）</span>
+              <span v-if="player.id === leaderId && !isAi" class="chip">房主</span>
             </span>
-          </div>
-          <div class="player-tags">
-            <span v-if="player.id === myId" class="player-tag player-me">我</span>
-            <span v-if="player.id === leaderId" class="player-tag player-leader">房主</span>
-          </div>
-        </div>
-      </div>
-      <div v-if="players.length < 2" class="room-status">
-        等待对手加入…把房间号发给朋友吧
-      </div>
-      <div class="room-actions">
-        <button class="btn-danger" @click="leaveRoom">离开房间</button>
-      </div>
-    </div>
+            <span v-if="player.offline" class="chip chip-warning">掉线中</span>
+            <span v-else-if="player.ready" class="chip chip-success">✓ 已准备</span>
+            <span v-else class="chip">布置中</span>
+          </li>
+          <li v-if="players.length < 2" class="waiting">
+            <span class="avatar ghost">?</span>
+            <span class="muted">等待对手加入…把房间号发给朋友吧</span>
+          </li>
+        </ul>
+      </section>
 
-    <div class="card setup-board">
-      <h2>放置飞机</h2>
-      <p class="setup-instruction">
-        {{ planes.length ? '已为你布置 3 架飞机。拖动调整位置，选中后旋转；也可以换一组布局。' : '点击「随机布置」生成布局，再拖动、旋转调整。' }}
-      </p>
+      <section class="card fleet-card">
+        <h3 class="card-title">我的机队</h3>
+        <ul class="fleet">
+          <li v-for="(plane, index) in planes" :key="plane.id" :class="{ on: index === selectedPlaneIndex }">
+            <i class="swatch" :class="'pi-' + index"></i>
+            <span>{{ ['一', '二', '三'][index] }}号机</span>
+            <span class="fleet-state">{{ index === selectedPlaneIndex ? '已选中' : '已放置' }}</span>
+          </li>
+          <li v-if="!planes.length" class="muted">还没有飞机，点「随机布置」生成一组</li>
+        </ul>
+        <p class="muted shortcuts">快捷键：<kbd>R</kbd> 旋转　<kbd>Space</kbd> 随机　<kbd>Enter</kbd> 准备</p>
+      </section>
 
-      <div class="board-container">
-        <div class="board-wrapper">
-          <div class="board">
-            <div class="board-labels board-row-labels">
-              <div class="label" v-for="i in 10" :key="'row-' + i">{{ i }}</div>
-            </div>
-            <div class="board-labels board-col-labels">
-              <div class="label" v-for="col in columns" :key="'col-' + col">{{ col }}</div>
-            </div>
-            <div class="board-grid">
-              <div v-for="row in 10" :key="'r' + row" class="board-row">
-                <div
-                  v-for="col in columns"
-                  :key="'c' + col"
-                  class="board-cell"
-                  :class="getCellClass(row, col)"
-                  :data-row="row"
-                  :data-col="col"
-                  @contextmenu.prevent="handleRightClick(row, col)"
-                  @pointerdown="handleCellPointerDown($event, row, col)"
-                ></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
+      <section class="card actions-card">
         <div class="setup-controls">
-          <button class="btn-secondary" @click="generateRandomPlanes" :disabled="isReady">随机布置</button>
-          <button class="btn-secondary" @click="rotateSelected" :disabled="isReady || selectedPlaneIndex === -1">旋转所选</button>
-          <button class="btn-secondary" @click="clearPlanes" :disabled="isReady">清除</button>
-          <button v-if="!isReady" class="btn-primary" @click="ready" :disabled="planes.length < 3 || preparing">{{ preparing ? '提交中…' : isAi ? '准备并开始' : '准备' }}</button>
-          <button v-else-if="phase === 'waiting'" class="btn-secondary" :disabled="preparing || starting" @click="unready">重新布置</button>
-          <button v-if="!isAi && isLeader && canStartGame" class="btn-primary" :disabled="starting" @click="startGame">开始游戏</button>
+          <button class="btn" @click="generateRandomPlanes" :disabled="isReady">🎲 随机布置</button>
+          <button class="btn" @click="rotateSelected" :disabled="isReady || selectedPlaneIndex === -1">⟳ 旋转所选</button>
+          <button class="btn btn-ghost" @click="clearPlanes" :disabled="isReady">清除</button>
+          <button v-if="!isReady" class="btn btn-primary main-action" @click="ready" :disabled="planes.length < 3 || preparing">{{ preparing ? '提交中…' : isAi ? '准备并开始' : '准备' }}</button>
+          <button v-else-if="phase === 'waiting'" class="btn main-action" :disabled="preparing || starting" @click="unready">重新布置</button>
+          <button v-if="!isAi && isLeader && canStartGame" class="btn btn-primary main-action" :disabled="starting" @click="startGame">开始游戏</button>
         </div>
         <p class="setup-tip" v-if="isReady">{{ readyTip }}</p>
-      </div>
-    </div>
+        <button type="button" class="btn btn-danger btn-sm leave" @click="leaveRoom">离开房间</button>
+      </section>
+    </aside>
   </div>
 </template>
 
@@ -83,6 +96,7 @@
 import { notify } from '../ui/dialog.js';
 import { copyText } from '../platform.js';
 import { buildPlane, randomPlanes, COLUMNS } from '../../shared/planes.js';
+import { LEVELS } from '../local/ai.js';
 
 const key = (row, col) => `${row},${col}`;
 let planeSeq = 0;
@@ -96,6 +110,7 @@ export default {
     username: { type: String, required: true },
     initialState: { type: Object, default: null },
     mode: { type: String, default: 'online' },
+    level: { type: String, default: 'normal' },
   },
   emits: ['gameStart', 'leave'],
   data() {
@@ -123,6 +138,9 @@ export default {
     isAi() {
       return this.mode === 'ai';
     },
+    levelLabel() {
+      return LEVELS[this.level]?.label || '';
+    },
     myId() {
       return this.socket.id;
     },
@@ -147,6 +165,7 @@ export default {
     document.addEventListener('pointermove', this.onPointerMove);
     document.addEventListener('pointerup', this.onPointerUp);
     document.addEventListener('pointercancel', this.onPointerUp);
+    document.addEventListener('keydown', this.onKeyDown);
     this.listeners = {
       roomState: (state) => this.applyState(state),
       gameStart: (data) => this.$emit('gameStart', data),
@@ -162,9 +181,26 @@ export default {
     document.removeEventListener('pointermove', this.onPointerMove);
     document.removeEventListener('pointerup', this.onPointerUp);
     document.removeEventListener('pointercancel', this.onPointerUp);
+    document.removeEventListener('keydown', this.onKeyDown);
     for (const [event, handler] of Object.entries(this.listeners || {})) this.socket.off(event, handler);
   },
   methods: {
+    // 快捷键：R 旋转、空格随机、回车准备（输入框和弹窗里不响应）
+    onKeyDown(event) {
+      if (event.target.closest?.('input, textarea, [role="dialog"]') || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === 'r' || event.key === 'R') {
+        event.preventDefault();
+        if (this.selectedPlaneIndex === -1 && this.planes.length) this.selectedPlaneIndex = 0;
+        this.rotateSelected();
+      } else if (event.key === ' ' && !this.isReady) {
+        if (event.target.closest?.('button')) return;
+        event.preventDefault();
+        this.generateRandomPlanes();
+      } else if (event.key === 'Enter' && !this.isReady && !event.target.closest?.('button')) {
+        event.preventDefault();
+        this.ready();
+      }
+    },
     // ---------- 房间 ----------
     applyState(state) {
       if (!state || state.roomId !== this.roomId) return;
@@ -341,8 +377,8 @@ export default {
       const ghost = this.ghostPlane?.coordinates.find((c) => c.row === row && c.col === col);
       if (ghost) {
         classes['cell-ghost'] = true;
-        classes[`plane-${ghost.part}`] = true;
-        classes[`direction-${this.ghostPlane.direction}`] = true;
+        classes['cell-head'] = ghost.isHead || ghost.part === 'head';
+        classes[`pi-${this.planes.findIndex((p) => p.id === this.ghostPlane.id)}`] = true;
         classes[this.ghostPlaneValid ? 'ghost-valid' : 'ghost-invalid'] = true;
         return classes;
       }
@@ -352,8 +388,8 @@ export default {
         const cell = plane.coordinates.find((c) => c.row === row && c.col === col);
         if (cell) {
           classes['cell-plane'] = true;
-          classes[`plane-${cell.part}`] = true;
-          classes[`direction-${plane.direction}`] = true;
+          classes[`pi-${this.planes.indexOf(plane)}`] = true;
+          classes['cell-head'] = cell.isHead || cell.part === 'head';
           classes['cell-selected'] = plane.id === this.getSelectedPlane()?.id;
           break;
         }
@@ -366,624 +402,394 @@ export default {
 
 <style scoped>
 .room-view {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-}
-
-.room-info {
-  flex: 1;
-  min-width: 300px;
-}
-
-.setup-board {
-  flex: 2;
-  min-width: 400px;
-}
-
-.setup-controls {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-}
-
-.setup-tip {
-  margin-top: 10px;
-  text-align: center;
-  color: var(--secondary-color);
-}
-
-.board {
-  --cell: 40px;
-}
-
-h2 {
-  margin-bottom: 20px;
-  text-align: center;
-}
-
-.info-row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 15px;
-}
-
-.info-label {
-  font-weight: 500;
-  min-width: 80px;
-}
-
-.info-value {
-  font-weight: 600;
-  color: var(--primary-color);
-}
-
-.copy-btn {
-  margin-left: 10px;
-  padding: 5px 10px;
-  font-size: 12px;
-}
-
-.players-list {
-  margin: 20px 0;
-}
-
-.player-item {
-  padding: 10px;
-  border-radius: 5px;
-  background-color: var(--background-color);
-  margin-bottom: 10px;
-}
-
-.player-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.player-name {
-  font-weight: 500;
-}
-
-.player-status {
-  font-size: 14px;
-  color: var(--miss-color);
-}
-
-.player-status.ready {
-  color: var(--secondary-color);
-}
-
-.player-tags {
-  display: flex;
-  gap: 5px;
-}
-
-.player-tag {
-  padding: 2px 5px;
-  border-radius: 3px;
-  font-size: 12px;
-}
-
-.player-tag.player-me {
-  background-color: var(--secondary-color);
-  color: white;
-}
-
-.player-tag.player-leader {
-  background-color: var(--primary-color);
-  color: white;
-}
-
-.room-status {
-  text-align: center;
-  margin-top: 20px;
-  color: #666;
-}
-
-.room-actions {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 20px;
-}
-
-.setup-instruction {
-  text-align: center;
-  margin-bottom: 20px;
-  color: #666;
-}
-
-.board-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.board-wrapper {
-  position: relative;
-  margin-bottom: 20px;
-}
-
-.board {
-  position: relative;
   display: grid;
-  grid-template-columns: 30px 1fr;
-  grid-template-rows: 30px 1fr;
-  gap: 0;
+  grid-template-columns: minmax(0, 600px) minmax(300px, 1fr);
+  gap: 24px;
+  align-items: start;
 }
 
-.board-labels {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.board-head {
+  margin-bottom: 14px;
 }
 
+.board-head h2 {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 2px;
+}
+
+/* 棋盘：坐标 + 10×10 格子，宽度随卡片缩放，始终是正方形 */
+.board {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  grid-template-rows: 20px auto;
+}
+
+.board-col-labels,
 .board-row-labels {
-  grid-column: 1;
-  grid-row: 2;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  color: var(--sk-text-dim);
+  font-size: 11px;
+  text-align: center;
 }
 
 .board-col-labels {
   grid-column: 2;
-  grid-row: 1;
+  grid-template-columns: repeat(10, 1fr);
+  align-items: center;
 }
 
-.label {
-  width: var(--cell);
-  height: var(--cell);
-  display: flex;
+.board-row-labels {
+  grid-row: 2;
+  grid-template-rows: repeat(10, 1fr);
   align-items: center;
-  justify-content: center;
-  font-weight: 500;
 }
 
 .board-grid {
   grid-column: 2;
   grid-row: 2;
-  display: flex;
-  flex-direction: column;
-  border: 2px solid var(--border-color);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  grid-template-rows: repeat(10, 1fr);
+  aspect-ratio: 1;
+  gap: var(--sk-grid-gap);
+  padding: var(--sk-grid-gap);
+  border-radius: calc(var(--sk-cell-radius) + 6px);
+  background: var(--sk-mine-line);
+}
+
+html[data-fx-dashed-grid] .board-grid {
+  border: 2px solid var(--sk-mine-line);
 }
 
 .board-row {
-  display: flex;
+  display: contents;
 }
 
 .board-cell {
-  width: var(--cell);
-  height: var(--cell);
-  border: 1px solid var(--border-color);
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: var(--sk-cell-radius);
+  background: var(--sk-mine-cell);
   touch-action: pan-y;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  background-color: white;
-  transition: all 0.3s ease;
-  position: relative;
 }
 
-.board-cell.valid-cell:hover {
-  background-color: rgba(52, 152, 219, 0.1);
+html[data-fx-dashed-grid] .board-cell {
+  border: 0.5px dashed var(--sk-mine-line);
 }
 
-/* 飞机基本样式 */
+/* 三架飞机三种颜色：机头用原色加圆点，机身调淡 */
+.board-cell.pi-0 { --plane: var(--sk-plane-1); }
+.board-cell.pi-1 { --plane: var(--sk-plane-2); }
+.board-cell.pi-2 { --plane: var(--sk-plane-3); }
+
 .board-cell.cell-plane {
-  background-color: var(--plane-color-1);
-  position: relative;
-  z-index: 1;
-}
-
-/* 飞机头部样式 */
-.board-cell.plane-head {
-  background-color: var(--plane-color-2);
-  z-index: 2;
-  border: none;
-}
-
-/* 飞机机身样式 */
-.board-cell.plane-body {
-  background-color: var(--plane-color-1);
-  border: none;
-}
-
-/* 机翼中心部分样式 */
-.board-cell.plane-wing-center {
-  background-color: var(--plane-color-1);
-  position: relative;
-  z-index: 1;
-  border: none;
-}
-
-/* 机翼侧面样式 */
-.board-cell.plane-wing-left,
-.board-cell.plane-wing-right,
-.board-cell.plane-wing-up,
-.board-cell.plane-wing-down {
-  background-color: var(--plane-color-1);
-  border: none;
-}
-
-/* 机翼尖端样式 */
-.board-cell.plane-wing-left-tip,
-.board-cell.plane-wing-right-tip,
-.board-cell.plane-wing-up-tip,
-.board-cell.plane-wing-down-tip {
-  background-color: var(--plane-color-1);
-  border: none;
-}
-
-/* 尾翼中心部分样式 */
-.board-cell.plane-tail-center {
-  background-color: var(--plane-color-1);
-  border: none;
-}
-
-/* 尾翼侧面样式 */
-.board-cell.plane-tail-left,
-.board-cell.plane-tail-right,
-.board-cell.plane-tail-up,
-.board-cell.plane-tail-down {
-  background-color: var(--plane-color-1);
-  border: none;
-}
-
-/* 朝上的飞机样式 */
-.direction-0.plane-head {
-  border-top-left-radius: 50%;
-  border-top-right-radius: 50%;
-  border-bottom: none;
-}
-
-.direction-0.plane-wing-center {
-  border-top: none;
-}
-
-.direction-0.plane-body {
-  border-left: none;
-  border-right: none;
-}
-
-.direction-0.plane-wing-left-tip {
-  border-top-left-radius: 40%;
-  border-bottom-left-radius: 40%;
-}
-
-.direction-0.plane-wing-right-tip {
-  border-top-right-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-.direction-0.plane-tail-center {
-  border-radius: 0;
-}
-
-.direction-0.plane-tail-left {
-  border-top-left-radius: 40%;
-  border-bottom-left-radius: 40%;
-}
-
-.direction-0.plane-tail-right {
-  border-top-right-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-/* 朝右的飞机样式 */
-.direction-1.plane-head {
-  border-top-right-radius: 50%;
-  border-bottom-right-radius: 50%;
-  border-left: none;
-}
-
-.direction-1.plane-wing-center {
-  border-right: none;
-}
-
-.direction-1.plane-body {
-  border-top: none;
-  border-bottom: none;
-}
-
-.direction-1.plane-wing-up-tip {
-  border-top-left-radius: 40%;
-  border-top-right-radius: 40%;
-}
-
-.direction-1.plane-wing-down-tip {
-  border-bottom-left-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-.direction-1.plane-tail-center {
-  border-radius: 0;
-}
-
-.direction-1.plane-tail-up {
-  border-top-left-radius: 40%;
-  border-top-right-radius: 40%;
-}
-
-.direction-1.plane-tail-down {
-  border-bottom-left-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-/* 朝下的飞机样式 */
-.direction-2.plane-head {
-  border-bottom-left-radius: 50%;
-  border-bottom-right-radius: 50%;
-  border-top: none;
-}
-
-.direction-2.plane-wing-center {
-  border-bottom: none;
-}
-
-.direction-2.plane-body {
-  border-left: none;
-  border-right: none;
-}
-
-.direction-2.plane-wing-left-tip {
-  border-top-left-radius: 40%;
-  border-bottom-left-radius: 40%;
-}
-
-.direction-2.plane-wing-right-tip {
-  border-top-right-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-.direction-2.plane-tail-center {
-  border-radius: 0;
-}
-
-.direction-2.plane-tail-left {
-  border-top-left-radius: 40%;
-  border-bottom-left-radius: 40%;
-}
-
-.direction-2.plane-tail-right {
-  border-top-right-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-/* 朝左的飞机样式 */
-.direction-3.plane-head {
-  border-top-left-radius: 50%;
-  border-bottom-left-radius: 50%;
-  border-right: none;
-}
-
-.direction-3.plane-wing-center {
-  border-left: none;
-}
-
-.direction-3.plane-body {
-  border-top: none;
-  border-bottom: none;
-}
-
-.direction-3.plane-wing-up-tip {
-  border-top-left-radius: 40%;
-  border-top-right-radius: 40%;
-}
-
-.direction-3.plane-wing-down-tip {
-  border-bottom-left-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-.direction-3.plane-tail-center {
-  border-radius: 0;
-}
-
-.direction-3.plane-tail-up {
-  border-top-left-radius: 40%;
-  border-top-right-radius: 40%;
-}
-
-.direction-3.plane-tail-down {
-  border-bottom-left-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-/* 飞机部分的阴影效果 */
-.cell-plane {
-  box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.2);
-}
-
-.setup-controls {
-  display: flex;
-  gap: 10px;
-  margin-top: 20px;
-}
-
-/* 飞机虚影样式 */
-.board-cell.cell-ghost {
-  opacity: 0.9;
-  z-index: 30;
-  transition: all 0.05s ease;
-  transform: scale(1);
-  box-shadow: 0 0 12px rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0% {
-    transform: scale(0.95);
-  }
-  50% {
-    transform: scale(1);
-  }
-  100% {
-    transform: scale(0.95);
-  }
-}
-
-.board-cell.ghost-valid {
-  background-color: rgba(46, 204, 113, 0.9);
-  box-shadow: 0 0 15px rgba(46, 204, 113, 0.8);
-  border-color: rgba(255, 255, 255, 0.7);
-}
-
-.board-cell.ghost-valid.plane-head {
-  background-color: rgba(46, 204, 113, 1);
-  box-shadow: 0 0 15px rgba(46, 204, 113, 0.9);
-}
-
-.board-cell.ghost-invalid {
-  background-color: rgba(231, 76, 60, 0.9);
-  box-shadow: 0 0 15px rgba(231, 76, 60, 0.8);
-  border-color: rgba(255, 255, 255, 0.7);
-}
-
-.board-cell.ghost-invalid.plane-head {
-  background-color: rgba(231, 76, 60, 1);
-  box-shadow: 0 0 15px rgba(231, 76, 60, 0.9);
-}
-
-.board-cell.cell-plane,
-.board-cell.cell-ghost {
-  /* 按住飞机拖动时不触发页面滚动 */
+  background: color-mix(in srgb, var(--plane) 58%, var(--sk-mine-cell));
   touch-action: none;
   cursor: grab;
 }
 
-.board-cell.cell-selected {
-  outline: 3px solid var(--warning-color);
-  outline-offset: -3px;
+.board-cell.cell-plane.cell-head {
+  background: var(--plane);
 }
 
-@media (max-width: 768px) {
-  .room-info { padding: 12px 16px; margin-bottom: 0; }
-  .room-info h2 { text-align: left; font-size: 1rem; margin-bottom: 8px; }
-  .room-info > .info-row { margin-bottom: 6px; }
-  .players-list { display: flex; gap: 8px; margin: 8px 0; }
-  .player-item { flex: 1; min-width: 0; padding: 8px; margin-bottom: 0; }
-  .player-info { flex-wrap: wrap; gap: 4px; font-size: 0.85rem; }
-  .player-name { overflow-wrap: anywhere; }
-  .player-status { font-size: 0.75rem; }
-  .room-actions { margin-top: 8px; }
-  .room-actions button { padding: 5px 10px; font-size: 0.8rem; background: #edf2f6; color: #526579; box-shadow: none; }
-  .setup-board { padding-bottom: 12px; }
-  .setup-board h2 { margin-bottom: 8px; font-size: 1.15rem; }
-  .setup-controls {
-    position: sticky;
-    bottom: max(8px, env(safe-area-inset-bottom));
-    z-index: 10;
-    width: 100%;
-    padding: 10px;
-    border: 1px solid #dfe6e9;
-    border-radius: 12px;
-    background: #fff;
-    box-shadow: 0 4px 16px rgba(25, 48, 70, 0.12);
-    gap: 6px;
-  }
-  .setup-controls button { padding: 9px 10px; font-size: 0.82rem; flex: 1 0 auto; }
+.board-cell.cell-head::before {
+  content: '';
+  width: 34%;
+  height: 34%;
+  border-radius: 50%;
+  background: var(--sk-head-dot);
+}
+
+.board-cell.cell-selected {
+  outline: 2px solid var(--sk-text);
+  outline-offset: -2px;
+}
+
+.board-cell.cell-ghost {
+  touch-action: none;
+}
+
+.board-cell.ghost-valid {
+  background: color-mix(in srgb, var(--plane, var(--sk-accent)) 32%, var(--sk-mine-cell));
+  outline: 2px dashed var(--plane, var(--sk-accent));
+  outline-offset: -2px;
+}
+
+.board-cell.ghost-invalid {
+  background: color-mix(in srgb, var(--sk-danger) 32%, var(--sk-mine-cell));
+  outline: 2px dashed var(--sk-danger);
+  outline-offset: -2px;
+}
+
+.board-grid.locked .board-cell {
+  cursor: default;
+}
+
+.board-foot {
+  margin-top: 12px;
+  text-align: center;
+}
+
+/* ---------- 侧栏 ---------- */
+.side {
+  display: grid;
+  gap: 16px;
+}
+
+.room-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.room-head > div:first-child {
+  display: grid;
+}
+
+.room-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.leave-sm {
+  display: none;
+}
+
+.room-code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 26px;
+  letter-spacing: 4px;
+}
+
+.room-mode {
+  font-size: 20px;
+}
+
+.players {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.players li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--sk-radius-sm);
+  background: var(--sk-surface-2);
+}
+
+.player-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.avatar {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--sk-plane-3), var(--sk-danger));
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.avatar.me {
+  background: linear-gradient(135deg, var(--sk-accent-2), var(--sk-accent));
+}
+
+.avatar.ghost {
+  background: transparent;
+  border: 1.5px dashed var(--sk-text-dim);
+  color: var(--sk-text-dim);
+}
+
+.fleet {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.fleet li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--sk-radius-sm);
+  background: var(--sk-surface-2);
+}
+
+.fleet li.on {
+  border-color: var(--sk-accent);
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+
+.swatch.pi-0 { background: var(--sk-plane-1); }
+.swatch.pi-1 { background: var(--sk-plane-2); }
+.swatch.pi-2 { background: var(--sk-plane-3); }
+
+.fleet-state {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--sk-success);
+}
+
+.fleet li.on .fleet-state {
+  color: var(--sk-accent);
+}
+
+.shortcuts {
+  margin-top: 12px;
+}
+
+kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--sk-line);
+  border-radius: 5px;
+  color: var(--sk-text);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.setup-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.setup-controls .main-action {
+  grid-column: 1 / -1;
+  min-height: 46px;
+  font-size: 15px;
+}
+
+.setup-tip {
+  margin-top: 10px;
+  color: var(--sk-success);
+  text-align: center;
+  font-weight: 600;
+}
+
+.leave {
+  margin-top: 12px;
+  width: 100%;
+}
+
+@media (max-width: 900px) {
   .room-view {
-    flex-direction: column;
+    grid-template-columns: 1fr;
     gap: 12px;
   }
 
-  .room-info,
-  .setup-board {
-    min-width: 0;
+  .side {
+    gap: 12px;
+  }
+
+  /* 手机上：房间信息放在棋盘上面，操作栏吸底 */
+  .side {
+    display: contents;
+  }
+
+  .room-card {
+    order: -1;
+  }
+
+  .fleet-card {
+    display: none;
+  }
+
+  .actions-card {
+    position: sticky;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    z-index: 10;
+    padding: 10px;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
+  }
+
+  .setup-controls {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+
+  .setup-controls .btn {
+    min-height: 38px;
+    padding: 0 8px;
+    font-size: 13px;
+  }
+
+  .setup-controls .main-action {
+    min-height: 42px;
+  }
+
+  .leave {
+    display: none;
+  }
+
+  .leave-sm {
+    display: inline-flex;
+  }
+
+  .room-card {
+    padding: 12px 14px;
+  }
+
+  .room-code {
+    font-size: 20px;
+  }
+
+  .players {
+    grid-template-columns: 1fr 1fr;
+    margin-top: 10px;
+  }
+
+  .players li {
+    padding: 7px 9px;
+    font-size: 13px;
+  }
+
+  .player-name .muted {
+    display: none;
+  }
+
+  .players .waiting {
+    grid-column: 1 / -1;
+  }
+
+  .board-card {
+    padding: 12px;
+  }
+
+  .board-head h2 {
+    font-size: 16px;
   }
 
   .board {
-    /* 屏幕宽度减去页面与卡片内边距、行号列 */
-    --cell: min(36px, calc((100vw - 84px) / 10));
-    grid-template-columns: 20px 1fr;
-    grid-template-rows: 20px 1fr;
+    grid-template-columns: 16px 1fr;
+    grid-template-rows: 16px auto;
   }
-
-  .board-row-labels .label,
-  .board-col-labels .label {
-    font-size: 12px;
-  }
-
-  .board-row-labels .label {
-    width: 20px;
-  }
-
-  .board-col-labels .label {
-    height: 20px;
-  }
-
-  .setup-instruction {
-    font-size: 13px;
-    margin-bottom: 12px;
-  }
-
-  .room-actions {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-}
-
-/* 尾翼样式增强 */
-/* 朝上的飞机尾翼 */
-.direction-0.plane-tail-center {
-  border-radius: 0;
-}
-
-.direction-0.plane-tail-left {
-  border-top-left-radius: 40%;
-  border-bottom-left-radius: 40%;
-}
-
-.direction-0.plane-tail-right {
-  border-top-right-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-/* 朝右的飞机尾翼 */
-.direction-1.plane-tail-center {
-  border-radius: 0;
-}
-
-.direction-1.plane-tail-up {
-  border-top-left-radius: 40%;
-  border-top-right-radius: 40%;
-}
-
-.direction-1.plane-tail-down {
-  border-bottom-left-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-/* 朝下的飞机尾翼 */
-.direction-2.plane-tail-center {
-  border-radius: 0;
-}
-
-.direction-2.plane-tail-left {
-  border-top-left-radius: 40%;
-  border-bottom-left-radius: 40%;
-}
-
-.direction-2.plane-tail-right {
-  border-top-right-radius: 40%;
-  border-bottom-right-radius: 40%;
-}
-
-/* 朝左的飞机尾翼 */
-.direction-3.plane-tail-center {
-  border-radius: 0;
-}
-
-.direction-3.plane-tail-up {
-  border-top-left-radius: 40%;
-  border-top-right-radius: 40%;
-}
-
-.direction-3.plane-tail-down {
-  border-bottom-left-radius: 40%;
-  border-bottom-right-radius: 40%;
 }
 </style>

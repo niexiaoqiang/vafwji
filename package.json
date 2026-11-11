@@ -12,7 +12,10 @@
     "server": "node server.js",
     "start": "concurrently \"npm run server\" \"npm run dev\"",
     "build:mini-app": "vite build --config vite.mini-app.config.js && node scripts/pack-mini-app.mjs",
-    "build:mini-app:debug": "MINI_APP_DEBUG=1 npm run build:mini-app"
+    "build:mini-app:debug": "MINI_APP_DEBUG=1 npm run build:mini-app",
+    "skins:check": "node scripts/check-skins.mjs",
+    "skins:preview": "node scripts/preview-skins.mjs",
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "@discourse-mini-app/sdk": "file:vendor/mini-app-sdk",

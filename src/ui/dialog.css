@@ -1,3 +1,4 @@
+/* 提示与确认框（DOM 实现，见 dialog.js），配色来自皮肤变量 */
 .app-toast-host {
   position: fixed;
   top: 16px;
@@ -14,12 +15,13 @@
 .app-toast {
   pointer-events: auto;
   padding: 10px 14px;
-  border-radius: 8px;
-  background: rgba(30, 41, 59, 0.95);
-  color: #fff;
+  border: 1px solid var(--sk-line);
+  border-radius: var(--sk-radius-sm);
+  background: var(--sk-surface);
+  color: var(--sk-text);
   font-size: 14px;
   line-height: 1.5;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25);
   cursor: pointer;
   animation: app-toast-in 0.2s ease-out;
 }
@@ -32,20 +34,21 @@
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgba(15, 23, 42, 0.45);
+  background: var(--sk-overlay);
 }
 
 .app-dialog {
   width: min(100%, 360px);
-  padding: 20px;
-  border-radius: 12px;
-  background: #fff;
-  color: #1e293b;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  padding: 22px;
+  border: 1px solid var(--sk-line);
+  border-radius: var(--sk-radius);
+  background: var(--sk-surface);
+  color: var(--sk-text);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
 }
 
 .app-dialog__text {
-  margin: 0 0 16px;
+  margin: 0 0 18px;
   font-size: 15px;
   line-height: 1.6;
 }
@@ -57,20 +60,21 @@
 }
 
 .app-dialog__button {
-  min-width: 72px;
-  padding: 8px 14px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  background: #fff;
-  color: #1e293b;
-  font-size: 14px;
+  min-width: 76px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--sk-line);
+  border-radius: var(--sk-radius-sm);
+  background: var(--sk-surface-2);
+  color: var(--sk-text);
+  font-weight: 700;
   cursor: pointer;
 }
 
 .app-dialog__button--primary {
-  border-color: #3498db;
-  background: #3498db;
-  color: #fff;
+  border-color: transparent;
+  background: var(--sk-accent);
+  color: var(--sk-accent-ink);
 }
 
 @keyframes app-toast-in {
@@ -81,11 +85,5 @@
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .app-toast {
-    animation: none;
   }
 }

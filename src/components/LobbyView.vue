@@ -1,64 +1,71 @@
 <template>
   <div class="lobby">
-    <section class="card">
-      <label class="field">
-        <span>昵称</span>
-        <input v-model.trim="username" maxlength="20" placeholder="输入你的昵称" />
+    <div class="greeting">
+      <label class="name-field">
+        <span class="muted">昵称</span>
+        <input v-model.trim="username" class="input name-input" maxlength="20" placeholder="输入你的昵称" />
       </label>
-    </section>
+      <span class="muted greeting-tip">对局中会显示给对手</span>
+    </div>
 
-    <section class="card">
-      <h2>人机对战</h2>
-      <p class="hint">和电脑练练手，不需要联网等人</p>
-      <div class="segmented" role="group" aria-label="难度">
-        <button
-          v-for="(info, level) in levels"
-          :key="level"
-          type="button"
-          :class="{ active: aiLevel === level }"
-          @click="aiLevel = level"
-        >{{ info.label }}</button>
-      </div>
-      <button type="button" class="btn-primary wide" :disabled="!username" @click="startAi">开始人机对战</button>
-    </section>
-
-    <section class="card">
-      <h2>联机对战</h2>
-      <p v-if="!connected" class="hint warn">正在连接游戏服务器…</p>
-      <div class="row">
-        <input v-model.trim="createId" maxlength="12" placeholder="自定义房间号（可选）" @keyup.enter="createRoom" />
-        <button type="button" class="btn-primary" :disabled="!canOnline" @click="createRoom">创建房间</button>
-      </div>
-      <div class="row">
-        <input v-model.trim="joinId" maxlength="12" placeholder="输入好友的房间号" @keyup.enter="joinRoom()" />
-        <button type="button" class="btn-primary" :disabled="!canOnline || !joinId" @click="joinRoom()">加入</button>
-      </div>
-
-      <div class="rooms">
-        <div class="rooms-head">
-          <h3>等待对手的房间</h3>
-          <button type="button" class="btn-link" :disabled="!connected" @click="refreshRooms">刷新</button>
+    <div class="modes">
+      <!-- 人机对战 -->
+      <section class="card hero hero-ai">
+        <div class="hero-text">
+          <h2>快速开始</h2>
+          <p class="muted">和电脑对战，不用等人，随时练手</p>
         </div>
-        <p v-if="rooms.length === 0" class="hint">暂时没有，创建一个等朋友来吧</p>
-        <ul v-else>
-          <li v-for="room in rooms" :key="room.id">
-            <span class="room-id">{{ room.id }}</span>
-            <span class="hint">{{ room.players }}/2</span>
-            <button type="button" class="btn-secondary" :disabled="!canOnline" @click="joinRoom(room.id)">加入</button>
-          </li>
-        </ul>
-      </div>
-    </section>
+        <div class="seg level-seg" role="group" aria-label="难度">
+          <button
+            v-for="(info, level) in levels"
+            :key="level"
+            type="button"
+            :class="{ on: aiLevel === level }"
+            @click="aiLevel = level"
+          >{{ info.label }}<small>{{ levelHints[level] }}</small></button>
+        </div>
+        <button type="button" class="btn btn-primary btn-lg btn-block start-ai" :disabled="!username" @click="startAi">▶ 开始人机对战</button>
+      </section>
 
-    <section class="card stats">
-      <h2>我的战绩</h2>
-      <div class="stat-grid">
-        <div><b>{{ stats.online.win }}</b><span>联机胜</span></div>
-        <div><b>{{ stats.online.lose }}</b><span>联机负</span></div>
-        <div><b>{{ aiWins }}</b><span>人机胜</span></div>
-        <div><b>{{ hitRate }}</b><span>命中率</span></div>
-      </div>
-      <p v-if="stats.best" class="hint">最少攻击获胜：{{ stats.best }} 次攻击</p>
+      <!-- 联机对战 -->
+      <section class="card hero hero-online">
+        <div class="hero-text">
+          <h2>好友对战</h2>
+          <p class="muted">建个房间，把房间号发给朋友</p>
+        </div>
+        <p v-if="!connected" class="net-state">{{ netNotice || '正在连接游戏服务器…' }}</p>
+        <div class="row create-row">
+          <input v-model.trim="createId" class="input" maxlength="12" placeholder="自定义房间号（可选）" @keyup.enter="createRoom" />
+          <button type="button" class="btn btn-primary" :disabled="!canOnline" @click="createRoom">创建房间</button>
+        </div>
+        <div class="row">
+          <input v-model.trim="joinId" class="input" maxlength="12" placeholder="输入好友的房间号" @keyup.enter="joinRoom()" />
+          <button type="button" class="btn" :disabled="!canOnline || !joinId" @click="joinRoom()">加入</button>
+        </div>
+
+        <div class="rooms">
+          <div class="rooms-head">
+            <span class="muted">等待对手的房间</span>
+            <button type="button" class="btn btn-ghost btn-sm" :disabled="!connected" @click="refreshRooms">刷新</button>
+          </div>
+          <p v-if="rooms.length === 0" class="muted empty">暂时没有，创建一个等朋友来吧</p>
+          <ul v-else>
+            <li v-for="room in rooms" :key="room.id">
+              <b class="room-id">{{ room.id }}</b>
+              <span class="chip chip-success">{{ room.players }}/2 等待中</span>
+              <button type="button" class="btn btn-sm" :disabled="!canOnline" @click="joinRoom(room.id)">加入房间</button>
+            </li>
+          </ul>
+        </div>
+      </section>
+    </div>
+
+    <section class="stats" aria-label="我的战绩">
+      <div class="card stat"><b>{{ stats.online.win }}</b><span>联机胜</span></div>
+      <div class="card stat"><b>{{ stats.online.lose }}</b><span>联机负</span></div>
+      <div class="card stat"><b>{{ aiWins }}</b><span>人机胜</span></div>
+      <div class="card stat"><b>{{ hitRate }}</b><span>命中率</span></div>
+      <div class="card stat"><b>{{ stats.best || '—' }}</b><span>最少攻击获胜</span></div>
     </section>
   </div>
 </template>
@@ -74,11 +81,14 @@ export default {
   props: {
     socket: { type: Object, default: null },
     defaultUsername: { type: String, default: '' },
+    netNotice: { type: String, default: '' },
   },
   emits: ['enter', 'startAi'],
   data() {
     return {
-      username: storage.getItem('username') || this.defaultUsername || '',
+      // 没填过昵称时自动生成一个，玩家想改再改
+      username: storage.getItem('username') || this.defaultUsername || `飞行员 ${Math.floor(1000 + Math.random() * 9000)}`,
+      levelHints: { easy: '适合新手', normal: '会顺着命中追击', hard: '概率推理' },
       createId: '',
       joinId: '',
       rooms: [],
@@ -108,7 +118,8 @@ export default {
       storage.setItem('aiLevel', value);
     },
     defaultUsername(value) {
-      if (!this.username && value) this.username = value;
+      // 社区昵称优先于自动生成的昵称
+      if (value && (!this.username || !storage.getItem('username'))) this.username = value;
     },
     // 联机连接在平台初始化后才创建，大厅可能先于它挂载
     socket(next, previous) {
@@ -187,164 +198,214 @@ export default {
 <style scoped>
 .lobby {
   display: grid;
-  gap: 14px;
-  max-width: 560px;
-  margin: 0 auto;
+  gap: 20px;
 }
 
-.card {
-  margin-bottom: 0;
-  padding: 18px;
+.greeting {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-h2 {
-  font-size: 1.15rem;
-  margin-bottom: 4px;
+.name-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-h3 {
-  font-size: 0.95rem;
+.name-input {
+  width: 220px;
+  font-weight: 700;
 }
 
-.hint {
-  color: #7f8c8d;
-  font-size: 0.85rem;
-  margin-bottom: 10px;
-}
-
-.hint.warn {
-  color: #b9770e;
-}
-
-.field {
+.modes {
   display: grid;
-  gap: 6px;
-  font-weight: 600;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 20px;
+  align-items: stretch;
+}
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+  background: linear-gradient(140deg, var(--sk-surface-2), var(--sk-surface) 70%);
+}
+
+.hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+.hero h2 {
+  font-size: 26px;
+  font-weight: 900;
+}
+
+/* 雷达特效：卡片右上角的雷达圈 */
+html[data-fx-radar] .hero::after {
+  content: '';
+  position: absolute;
+  right: -70px;
+  top: -70px;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, transparent 30%, color-mix(in srgb, var(--sk-accent) 24%, transparent) 31%, transparent 32.5%),
+    radial-gradient(circle, transparent 52%, color-mix(in srgb, var(--sk-accent) 18%, transparent) 53%, transparent 54.5%),
+    radial-gradient(circle, transparent 72%, color-mix(in srgb, var(--sk-accent) 14%, transparent) 73%, transparent 74.5%),
+    conic-gradient(from 20deg, color-mix(in srgb, var(--sk-accent) 34%, transparent), transparent 22%);
+}
+
+/* 纸面特效：卡片角落的纸飞机 */
+html[data-fx-paper] .hero::after {
+  content: '✈';
+  position: absolute;
+  right: 22px;
+  top: 6px;
+  font-size: 96px;
+  color: color-mix(in srgb, var(--sk-accent) 13%, transparent);
+  transform: rotate(-20deg);
+  pointer-events: none;
+}
+
+.start-ai {
+  margin-top: auto;
+}
+
+.net-state {
+  padding: 8px 12px;
+  border-radius: var(--sk-radius-sm);
+  background: color-mix(in srgb, var(--sk-warning) 14%, transparent);
+  color: var(--sk-warning);
+  font-size: 13px;
 }
 
 .row {
   display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 10px;
 }
 
-.row input {
+.row .input {
   flex: 1;
   min-width: 0;
 }
 
-.row button {
-  flex-shrink: 0;
-}
-
-.wide {
-  width: 100%;
-}
-
-.segmented {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  overflow: hidden;
-  margin-bottom: 12px;
-}
-
-.segmented button {
-  border-radius: 0;
-  background: #fff;
-  color: var(--text-color);
-  box-shadow: none;
-}
-
-.segmented button:hover {
-  transform: none;
-  background: #f2f4f7;
-}
-
-.segmented button.active {
-  background: var(--primary-color);
-  color: #fff;
-}
-
 .rooms {
-  margin-top: 6px;
-  border-top: 1px solid #eef1f4;
-  padding-top: 10px;
+  display: grid;
+  gap: 8px;
 }
 
 .rooms-head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
-}
-
-.btn-link {
-  padding: 4px 10px;
-  font-size: 0.85rem;
-  background: transparent;
-  color: var(--primary-color);
-  box-shadow: none;
-}
-
-.btn-link:hover {
-  transform: none;
-  background: #eef6fc;
+  justify-content: space-between;
 }
 
 .rooms ul {
   list-style: none;
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .rooms li {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  background: var(--background-color);
-  border-radius: 8px;
+  gap: 12px;
+  padding: 8px 10px 8px 14px;
+  border-radius: var(--sk-radius-sm);
+  background: var(--sk-surface-2);
 }
 
-.rooms li .hint {
-  margin: 0 auto 0 0;
+.rooms li .btn {
+  margin-left: auto;
 }
 
 .room-id {
-  font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 2px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
 }
 
-.btn-secondary {
-  background: #ecf0f1;
-  color: var(--text-color);
-  padding: 6px 14px;
+.empty {
+  padding: 6px 0;
 }
 
-.stat-grid {
+.stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin: 10px 0 6px;
-  text-align: center;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
 }
 
-.stat-grid div {
+.stat {
   display: grid;
   gap: 2px;
-  padding: 8px 0;
-  background: var(--background-color);
-  border-radius: 8px;
+  padding: 14px 18px;
 }
 
-.stat-grid b {
-  font-size: 1.2rem;
+.stat b {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
 }
 
-.stat-grid span {
-  font-size: 0.78rem;
-  color: #7f8c8d;
+.stat span {
+  color: var(--sk-text-dim);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .modes {
+    grid-template-columns: 1fr;
+  }
+
+  .stats {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .lobby {
+    gap: 12px;
+  }
+
+  .greeting-tip {
+    display: none;
+  }
+
+  .name-field {
+    width: 100%;
+  }
+
+  .name-input {
+    flex: 1;
+    width: auto;
+  }
+
+  .hero {
+    padding: 18px;
+    gap: 12px;
+  }
+
+  .hero h2 {
+    font-size: 21px;
+  }
+
+  .stats {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .stat {
+    padding: 10px 12px;
+  }
+
+  .stat b {
+    font-size: 18px;
+  }
 }
 </style>

@@ -1,19 +1,33 @@
 <template>
   <div :class="['app', { 'app--mini': isMiniApp }]">
-    <div class="app-header">
-      <h1>炸飞机</h1>
-      <button type="button" class="rules-btn" @click="showRules = true">规则</button>
-    </div>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">✈</span>
+        <span class="brand-name">炸飞机</span>
+      </div>
+      <nav class="crumb" aria-label="当前位置">
+        <span class="crumb-item" :class="{ on: view === 'lobby' }">大厅</span>
+        <template v-if="view !== 'lobby'">
+          <span class="crumb-sep" aria-hidden="true">/</span>
+          <span class="crumb-item on">{{ crumbText }}</span>
+        </template>
+      </nav>
+      <div class="topbar-actions">
+        <button type="button" class="btn btn-ghost btn-sm" @click="showSkins = true">🎨 <span class="hide-sm">皮肤</span></button>
+        <button type="button" class="btn btn-ghost btn-sm" @click="showRules = true">规则</button>
+      </div>
+    </header>
 
     <div v-if="connectionLost && mode === 'online' && view !== 'lobby'" class="conn-banner" role="status">
       连接中断，正在重连…对局会保留约 45 秒
     </div>
 
-    <div class="app-content">
+    <main class="app-main">
       <LobbyView
         v-if="view === 'lobby'"
         :socket="netSocket"
         :defaultUsername="defaultUsername"
+        :netNotice="netNotice"
         @enter="onEnterRoom"
         @startAi="onStartAi"
       />
@@ -25,6 +39,7 @@
         :username="username"
         :initialState="roomState"
         :mode="mode"
+        :level="aiLevel"
         @gameStart="onGameStart"
         @leave="backToLobby"
       />
@@ -40,14 +55,10 @@
         @returnToRoom="onReturnToRoom"
         @endGame="backToLobby"
       />
-      <p v-if="view === 'lobby' && netNotice" class="net-notice">{{ netNotice }}</p>
-    </div>
-
-    <div class="app-footer">
-      <p>炸飞机 · 联机或人机对战</p>
-    </div>
+    </main>
 
     <RulesDialog v-if="showRules" @close="showRules = false" />
+    <SkinPicker v-if="showSkins" @close="showSkins = false" />
   </div>
 </template>
 
@@ -60,10 +71,13 @@ import RoomView from './components/RoomView.vue';
 import GameView from './components/GameView.vue';
 import LobbyView from './components/LobbyView.vue';
 import RulesDialog from './components/RulesDialog.vue';
+import SkinPicker from './components/SkinPicker.vue';
+import { loadSavedSkin } from './skins/index.js';
+import { LEVELS } from './local/ai.js';
 
 export default {
   name: 'App',
-  components: { RoomView, GameView, LobbyView, RulesDialog },
+  components: { RoomView, GameView, LobbyView, RulesDialog, SkinPicker },
   data() {
     return {
       isMiniApp,
@@ -81,11 +95,20 @@ export default {
       connectionLost: false,
       netNotice: '',
       showRules: false,
+      showSkins: false,
     };
   },
   computed: {
     activeSocket() {
       return this.mode === 'ai' ? this.localSocket : this.netSocket;
+    },
+    crumbText() {
+      if (this.mode === 'ai') return `人机对战 · ${LEVELS[this.aiLevel]?.label || ''}`;
+      if (this.view === 'game') {
+        const opponent = this.gameData?.players?.find((p) => p.id !== this.netSocket?.id);
+        return opponent ? `对战 ${opponent.username}` : '对战中';
+      }
+      return `房间 ${this.roomId}`;
     },
   },
   created() {
@@ -104,9 +127,12 @@ export default {
       try {
         const { user } = await initPlatform();
         if (user) this.defaultUsername = user.name || user.username || '';
+        // 平台就绪后才能读取社区存储里的皮肤选择
+        loadSavedSkin();
         this.netSocket = markRaw(connectRealtime());
       } catch (error) {
         console.error('联机初始化失败:', error);
+        loadSavedSkin();
         this.netNotice = `暂时无法联机（${error?.message || error}），可以先玩人机对战`;
         return;
       }
@@ -201,217 +227,133 @@ export default {
 };
 </script>
 
-<style>
-/* 不再加载外部字体：微应用不允许远程样式/字体 URL，使用系统字体栈 */
-
-:root {
-  --primary-color: #3498db;
-  --secondary-color: #2ecc71;
-  --danger-color: #e74c3c;
-  --warning-color: #f39c12;
-  --background-color: #f5f7fa;
-  --text-color: #2c3e50;
-  --border-color: #dfe6e9;
-  --plane-color-1: #3498db;
-  --plane-color-2: #2ecc71;
-  --plane-color-3: #e74c3c;
-  --hit-color: #e74c3c;
-  --miss-color: #7f8c8d;
-  --sink-color: #000000;
-  --mark-color: #f39c12;
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  background-color: var(--background-color);
-  color: var(--text-color);
-  min-height: 100vh;
-}
-
+<style scoped>
 .app {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   min-height: 100vh;
-  padding: 20px;
 }
 
-.app.app--mini {
-  /* 微应用容器按内容高度自适应，避免 100vh 与内边距叠加造成循环增高 */
+.app--mini {
+  /* 微应用容器按内容高度自适应 */
   min-height: auto;
 }
 
-.loading-error {
-  color: var(--danger-color);
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px clamp(14px, 3vw, 32px);
+  border-bottom: 1px solid var(--sk-line);
+  background: color-mix(in srgb, var(--sk-surface) 82%, transparent);
+  backdrop-filter: blur(10px);
 }
 
-.app-header {
-  position: relative;
-  text-align: center;
-  margin-bottom: 24px;
-  color: var(--primary-color);
-  font-size: 2.5rem;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.rules-btn {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 6px 14px;
-  font-size: 0.9rem;
-  background: #fff;
-  color: var(--primary-color);
-  border: 1px solid var(--primary-color);
-  box-shadow: none;
-  text-shadow: none;
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--sk-accent);
+  color: var(--sk-accent-ink);
+  font-size: 18px;
+  box-shadow: var(--sk-glow);
 }
 
-.rules-btn:hover {
-  transform: translateY(-50%);
-  background: #eef6fc;
+.brand-name {
+  font-family: var(--sk-font-title);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 1px;
 }
 
-.net-notice {
-  max-width: 560px;
-  margin: 12px auto 0;
-  color: #b9770e;
-  font-size: 0.9rem;
-  text-align: center;
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--sk-text-dim);
+}
+
+.crumb-item {
+  padding: 4px 10px;
+  border-radius: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb-item.on {
+  background: var(--sk-surface-2);
+  color: var(--sk-text);
+}
+
+.crumb-sep {
+  opacity: 0.5;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .conn-banner {
   position: sticky;
-  top: 0;
-  z-index: 1500;
-  margin: 0 auto 12px;
-  max-width: 560px;
+  top: 58px;
+  z-index: 40;
+  margin: 10px auto 0;
   padding: 8px 14px;
-  border-radius: 8px;
-  background: #fff4e5;
-  color: #8a4b00;
-  border: 1px solid #f5c27a;
+  border: 1px solid color-mix(in srgb, var(--sk-warning) 50%, transparent);
+  border-radius: var(--sk-radius-sm);
+  background: color-mix(in srgb, var(--sk-warning) 16%, var(--sk-surface));
+  color: var(--sk-text);
+  font-size: 13px;
   text-align: center;
-  font-size: 14px;
 }
 
-.app-content {
+.app-main {
   flex: 1;
-}
-
-.app-footer {
-  text-align: center;
-  padding: 10px;
-  background-color: var(--primary-color);
-  color: white;
-}
-
-button {
-  background-color: var(--primary-color);
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 16px;
-  font-weight: 500;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-}
-
-button:hover {
-  background-color: #2980b9;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-}
-
-button:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.1);
-}
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-  transform: none;
-  box-shadow: none;
-}
-
-button:focus-visible { outline: 3px solid #f39c12; outline-offset: 3px; }
-
-button.secondary {
-  background-color: var(--secondary-color);
-}
-
-button.secondary:hover {
-  background-color: #27ae60;
-}
-
-button.danger {
-  background-color: var(--danger-color);
-}
-
-button.danger:hover {
-  background-color: #c0392b;
-}
-
-input {
-  padding: 10px 15px;
-  border: 1px solid var(--border-color);
-  border-radius: 5px;
-  font-size: 16px;
   width: 100%;
-  transition: border-color 0.3s ease;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px clamp(12px, 3vw, 32px) 32px;
 }
 
-input:focus {
-  outline: none;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
-}
-
-.form-group {
-  margin-bottom: 20px;
-}
-
-label {
-  display: block;
-  margin-bottom: 8px;
-  font-weight: 500;
-}
-
-.card {
-  background-color: white;
-  border-radius: 10px;
-  padding: 30px;
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
-  margin-bottom: 20px;
-}
-
-.btn-group {
-  display: flex;
-  gap: 10px;
-}
-
-@media (max-width: 768px) {
-  .app {
-    padding: 12px;
+@media (max-width: 760px) {
+  .topbar {
+    gap: 10px;
+    padding: 10px 12px;
   }
 
-  .app-header {
-    font-size: 1.6rem;
-    margin-bottom: 12px;
+  .brand-mark {
+    width: 28px;
+    height: 28px;
+    font-size: 15px;
   }
 
-  .card {
-    padding: 16px;
+  .brand-name {
+    font-size: 17px;
+  }
+
+  .crumb .crumb-item:first-child,
+  .crumb-sep,
+  .hide-sm {
+    display: none;
+  }
+
+  .app-main {
+    padding: 12px 12px 20px;
   }
 }
 </style>

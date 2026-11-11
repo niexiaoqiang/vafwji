@@ -1,63 +1,52 @@
 <template>
   <div class="game-view">
-    <!-- 状态栏：回合、倒计时、剩余飞机 -->
-    <div class="game-status" :class="{ 'is-my-turn': isYourTurn && !gameOver }">
-      <div class="status-main">
-        <div class="status-text">{{ statusMessage }}</div>
-        <div v-if="!gameOver && remainingSeconds !== null" class="turn-timer" :class="{ urgent: remainingSeconds <= 10 }">
-          {{ remainingSeconds }}s
-        </div>
+    <!-- 状态栏：回合、倒计时、双方剩余飞机 -->
+    <section class="card game-status" :class="{ 'is-my-turn': isYourTurn && !gameOver, over: gameOver }">
+      <div class="status-text">{{ statusMessage }}</div>
+      <div v-if="!gameOver && remainingSeconds !== null" class="timer" :class="{ urgent: remainingSeconds <= 10 }">
+        <span class="timer-bar"><i :style="{ width: turnProgress + '%' }"></i></span>
+        <span class="timer-text">{{ remainingSeconds }}s</span>
       </div>
-      <div class="status-sub">
-        <span>对方飞机 <b>{{ enemyAlive }}</b>/{{ planeCount }}</span>
-        <span>我方飞机 <b>{{ myAlive }}</b>/{{ planeCount }}</span>
-        <button type="button" class="link-btn" :disabled="leaving" @click="leaveGame">{{ leaving ? '退出中…' : '退出' }}</button>
+      <div class="fleets">
+        <span>对方 <b>{{ enemyAlive }}</b>/{{ planeCount }}
+          <span class="dots"><i v-for="(p, i) in enemy.planes" :key="'e' + i" :class="{ down: p.sunk }"></i></span>
+        </span>
+        <span>我方 <b>{{ myAlive }}</b>/{{ planeCount }}
+          <span class="dots"><i v-for="(p, i) in me.planes" :key="'m' + i" :class="{ down: p.sunk }"></i></span>
+        </span>
       </div>
-      <div v-if="opponentOffline && !gameOver" class="status-warning">
-        {{ enemyName }} 掉线了，正在等待重连…
-      </div>
-      <div v-if="lastAutoMessage" class="status-note">{{ lastAutoMessage }}</div>
-    </div>
+      <button type="button" class="btn btn-danger btn-sm" :disabled="leaving" @click="leaveGame">{{ leaving ? '退出中…' : '退出' }}</button>
+      <p v-if="opponentOffline && !gameOver" class="status-note warn">{{ enemyName }} 掉线了，正在等待重连…</p>
+      <p v-if="lastAutoMessage" class="status-note">{{ lastAutoMessage }}</p>
+    </section>
 
     <!-- 手机端用标签切换两个棋盘 -->
-    <div class="board-tabs" role="tablist">
-      <button
-        type="button"
-        role="tab"
-        :class="{ active: activeTab === 'enemy' }"
-        :aria-selected="activeTab === 'enemy'"
-        @click="activeTab = 'enemy'"
-      >
+    <div class="seg board-tabs" role="tablist">
+      <button type="button" role="tab" :class="{ on: activeTab === 'enemy' }" :aria-selected="activeTab === 'enemy'" @click="activeTab = 'enemy'">
         对方棋盘<span v-if="isYourTurn && !gameOver" class="tab-dot"></span>
       </button>
-      <button
-        type="button"
-        role="tab"
-        :class="{ active: activeTab === 'mine' }"
-        :aria-selected="activeTab === 'mine'"
-        @click="activeTab = 'mine'"
-      >
+      <button type="button" role="tab" :class="{ on: activeTab === 'mine' }" :aria-selected="activeTab === 'mine'" @click="activeTab = 'mine'">
         我的棋盘<span v-if="unseenHits > 0" class="tab-badge">{{ unseenHits }}</span>
       </button>
     </div>
 
-    <div class="boards">
+    <div class="battle">
       <!-- 对方棋盘（攻击区） -->
-      <section class="board-panel" :class="{ 'tab-hidden': activeTab !== 'enemy' }">
-        <div class="board-header">
+      <section class="card panel enemy-panel" :class="{ 'tab-hidden': activeTab !== 'enemy' }">
+        <div class="panel-head">
           <h3>对方棋盘</h3>
-          <div class="mode-switch" role="group" aria-label="点击格子的作用">
-            <button type="button" :class="{ active: clickMode === 'attack' }" @click="clickMode = 'attack'">攻击</button>
-            <button type="button" :class="{ active: clickMode === 'mark' }" @click="clickMode = 'mark'">标记</button>
+          <div class="seg mode-seg" role="group" aria-label="点击格子的作用">
+            <button type="button" :class="{ on: clickMode === 'attack' }" @click="clickMode = 'attack'">攻击</button>
+            <button type="button" :class="{ on: clickMode === 'mark' }" @click="clickMode = 'mark'">标记</button>
           </div>
         </div>
-        <p class="board-hint">
-          {{ clickMode === 'attack' ? (quickAttack ? '快速攻击已开启：点击格子立即攻击' : '先选择坐标，再确认攻击；击中机头可连击') : '虚线是你的猜测：排除 → 机身 → 机头 → 清除' }}
+        <p class="muted hint">
+          {{ clickMode === 'attack' ? (quickAttack ? '快速攻击已开启：点击格子立即攻击' : '先选择坐标，再确认攻击；击中机头可连击') : '虚线是你的猜测：排除 → 机身 → 机头 → 清除（电脑上也可右键标记）' }}
         </p>
-        <div class="grid-wrap">
+        <div class="board">
           <div class="col-labels"><span v-for="col in columns" :key="col">{{ col }}</span></div>
           <div class="row-labels"><span v-for="row in 10" :key="row">{{ row }}</span></div>
-          <div class="grid" :class="{ attackable: canAttack && clickMode === 'attack' }">
+          <div class="grid enemy" :class="{ attackable: canAttack && clickMode === 'attack' }">
             <template v-for="row in 10" :key="'er' + row">
               <button
                 v-for="col in columns"
@@ -65,6 +54,7 @@
                 type="button"
                 class="cell"
                 :class="enemyCellClass(row, col)"
+                :data-coord="`${col}${row}`"
                 :aria-label="`${col}${row}`"
                 :aria-pressed="selectedTarget?.row === row && selectedTarget?.col === col"
                 :disabled="gameOver || !!myShots[keyFor(row, col)] || !!sunkCells[keyFor(row, col)]"
@@ -76,70 +66,93 @@
         </div>
         <div v-if="!gameOver && clickMode === 'attack'" class="attack-controls">
           <label class="quick-toggle"><input v-model="quickAttack" type="checkbox" />快速攻击</label>
-          <button v-if="!quickAttack" type="button" class="confirm-attack" :disabled="!canAttack || !selectedTarget" @click="attack(selectedTarget.row, selectedTarget.col)">
+          <button v-if="!quickAttack" type="button" class="btn btn-primary confirm-attack" :disabled="!canAttack || !selectedTarget" @click="attack(selectedTarget.row, selectedTarget.col)">
             {{ selectedTarget ? `攻击 ${selectedTarget.col}${selectedTarget.row}` : '请选择坐标' }}
           </button>
         </div>
         <div class="legend">
-          <span><i class="lg lg-miss">·</i>未命中</span>
-          <span><i class="lg lg-hit">✕</i>命中机身</span>
-          <span><i class="lg lg-sink">○</i>击落（机头）</span>
-          <span><i class="lg lg-mark">?</i>我的标记</span>
+          <span><i class="lg cell cell-miss">{{ icons.miss }}</i>未命中</span>
+          <span><i class="lg cell cell-hit">{{ icons.hit }}</i>命中机身</span>
+          <span><i class="lg cell cell-sink">{{ icons.sink }}</i>击落</span>
+          <span><i class="lg cell cell-mark">{{ icons.mark }}</i>我的标记</span>
         </div>
       </section>
 
       <!-- 我的棋盘（防守区） -->
-      <section class="board-panel" :class="{ 'tab-hidden': activeTab !== 'mine' }">
-        <div class="board-header">
+      <section class="card panel mine-panel" :class="{ 'tab-hidden': activeTab !== 'mine' }">
+        <div class="panel-head">
           <h3>我的棋盘</h3>
+          <span class="muted">被命中 {{ hitsOnMe }} 次</span>
         </div>
-        <p class="board-hint">对方的每次攻击都会标在这里</p>
-        <div class="grid-wrap">
+        <div class="board">
           <div class="col-labels"><span v-for="col in columns" :key="col">{{ col }}</span></div>
           <div class="row-labels"><span v-for="row in 10" :key="row">{{ row }}</span></div>
-          <div class="grid">
+          <div class="grid mine">
             <template v-for="row in 10" :key="'mr' + row">
-              <div
-                v-for="col in columns"
-                :key="'m' + row + col"
-                class="cell"
-                :class="myCellClass(row, col)"
-              >{{ myCellText(row, col) }}</div>
+              <div v-for="col in columns" :key="'m' + row + col" class="cell" :class="myCellClass(row, col)">{{ myCellText(row, col) }}</div>
             </template>
           </div>
         </div>
       </section>
-    </div>
 
-    <p v-if="lastAttackText" class="last-attack" role="status">{{ lastAttackText }}</p>
-    <!-- 对局记录 -->
-    <details class="game-log">
-      <summary>对局记录<span v-if="logs.length" class="log-latest">：{{ logs[0].text }}</span></summary>
-      <ol>
-        <li v-for="item in logs" :key="item.id" :class="'log-' + item.type">{{ item.text }}</li>
-      </ol>
-    </details>
+      <!-- 对局记录 -->
+      <section class="card panel log-panel">
+        <div class="panel-head">
+          <h3>对局记录</h3>
+          <span class="muted">共 {{ shotTotal }} 手</span>
+        </div>
+        <p v-if="lastAttackText" class="last-attack" role="status">{{ lastAttackText }}</p>
+        <ol class="log">
+          <li v-for="item in logs" :key="item.id" :class="['log-' + item.type, item.who && 'who-' + item.who]">
+            <span v-if="item.who" class="tag">{{ item.who === 'me' ? '我' : enemyName }}</span>
+            <span>{{ item.text }}</span>
+          </li>
+        </ol>
+      </section>
+    </div>
 
     <!-- 结束弹窗 -->
     <div v-if="gameOver && showResult" class="game-overlay">
-      <div class="game-result" role="dialog" aria-modal="true">
-        <h2>{{ winner === myId ? '你赢了！' : '你输了' }}</h2>
-        <p v-if="gameOverReason" class="result-reason">{{ gameOverReason }}</p>
-        <p class="result-stats">
-          攻击 {{ myShotCount }} 次 · 命中率 {{ hitRateText }}<span v-if="durationText"> · 用时 {{ durationText }}</span>
-        </p>
-        <p v-if="opponentWantsRematch" class="result-rematch">{{ enemyName }} 想再来一局</p>
-        <div class="result-actions">
-          <button type="button" class="btn-primary" @click="playAgain">再来一局</button>
-          <button type="button" class="btn-secondary" @click="showResult = false">查看棋盘</button>
-          <button type="button" class="btn-secondary" @click="backToLobby">返回大厅</button>
+      <div class="game-result" :class="{ win: winner === myId }" role="dialog" aria-modal="true">
+        <div class="result-hero">
+          <div class="medal" aria-hidden="true">{{ winner === myId ? '🏆' : '💥' }}</div>
+          <h2>{{ winner === myId ? '你赢了！' : '你输了' }}</h2>
+          <p class="muted">{{ gameOverReason || (winner === myId ? '击落全部 3 架飞机' : `${enemyName} 先击落了你的飞机`) }}</p>
+        </div>
+        <div class="result-body">
+          <div class="kpis">
+            <div><b>{{ myShotCount }}</b><span>攻击次数</span></div>
+            <div><b>{{ hitRateText }}</b><span>命中率</span></div>
+            <div><b>{{ durationShort }}</b><span>用时</span></div>
+          </div>
+          <div class="minis">
+            <div>
+              <div class="mini-grid enemy">
+                <i v-for="cell in miniCells" :key="'me' + cell.k" class="mini" :class="revealMiniClass(cell)"></i>
+              </div>
+              <span class="muted">对方布局</span>
+            </div>
+            <div>
+              <div class="mini-grid mine">
+                <i v-for="cell in miniCells" :key="'mm' + cell.k" class="mini" :class="myMiniClass(cell)"></i>
+              </div>
+              <span class="muted">我的布局</span>
+            </div>
+          </div>
+          <p v-if="opponentWantsRematch" class="rematch">{{ enemyName }} 想再来一局</p>
+          <div class="result-actions">
+            <button type="button" class="btn btn-primary" @click="playAgain">再来一局</button>
+            <button type="button" class="btn" @click="showResult = false">查看棋盘</button>
+            <button type="button" class="btn btn-ghost" @click="backToLobby">返回大厅</button>
+          </div>
         </div>
       </div>
     </div>
-    <div v-if="gameOver && !showResult" class="after-game-bar">
-      <span v-if="opponentWantsRematch">{{ enemyName }} 想再来一局</span>
-      <button type="button" class="btn-primary" @click="playAgain">再来一局</button>
-      <button type="button" class="btn-secondary" @click="backToLobby">返回大厅</button>
+    <div v-if="gameOver && !showResult" class="card after-game-bar">
+      <span v-if="opponentWantsRematch" class="rematch">{{ enemyName }} 想再来一局</span>
+      <button type="button" class="btn btn-primary" @click="playAgain">再来一局</button>
+      <button type="button" class="btn" @click="showResult = true">查看结果</button>
+      <button type="button" class="btn btn-ghost" @click="backToLobby">返回大厅</button>
     </div>
   </div>
 </template>
@@ -148,10 +161,16 @@
 import { storage } from '../platform.js';
 import { notify, confirmDialog } from '../ui/dialog.js';
 import { recordResult } from '../stats.js';
+import { skinState } from '../skins/index.js';
 
 const COLUMNS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
 const MARK_CYCLE = { undefined: 'miss', miss: 'hit', hit: 'sink', sink: undefined };
 const key = (row, col) => `${row},${col}`;
+const MINI_CELLS = Array.from({ length: 100 }, (_, i) => {
+  const row = Math.floor(i / 10) + 1;
+  const col = COLUMNS[i % 10];
+  return { row, col, k: key(row, col) };
+});
 let logSeq = 0;
 
 export default {
@@ -178,6 +197,8 @@ export default {
       players: [],
       currentTurn: null,
       turnDeadline: null,
+      turnTotal: 0,
+      miniCells: MINI_CELLS,
       now: Date.now(),
       myShots: {},        // 我对对方的攻击：key -> pending | miss | hit | sink
       sunkCells: {},      // 对方被击落飞机的格子（由服务器在击落时公开）
@@ -243,6 +264,24 @@ export default {
       if (!this.durationMs) return '';
       const total = Math.round(this.durationMs / 1000);
       return total >= 60 ? `${Math.floor(total / 60)} 分 ${total % 60} 秒` : `${total} 秒`;
+    },
+    icons() {
+      return skinState.skin.icons;
+    },
+    turnProgress() {
+      if (!this.turnDeadline || !this.turnTotal) return 0;
+      return Math.max(0, Math.min(100, ((this.turnDeadline - this.now) / this.turnTotal) * 100));
+    },
+    hitsOnMe() {
+      return Object.values(this.incoming).filter((r) => r === 'hit' || r === 'sink').length;
+    },
+    shotTotal() {
+      return this.myShotCount + Object.keys(this.incoming).length;
+    },
+    durationShort() {
+      if (!this.durationMs) return '—';
+      const total = Math.round(this.durationMs / 1000);
+      return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
     },
     myHitCount() {
       return Object.values(this.myShots).filter((r) => r === 'hit' || r === 'sink').length;
@@ -319,13 +358,15 @@ export default {
     for (const [event, handler] of Object.entries(this.listeners || {})) this.socket.off(event, handler);
   },
   methods: {
-    addLog(text, type = 'info') {
-      this.logs.unshift({ id: ++logSeq, text, type });
+    addLog(text, type = 'info', who = '') {
+      this.logs.unshift({ id: ++logSeq, text, type, who });
       if (this.logs.length > 60) this.logs.pop();
     },
-    setDeadline(ms) {
+    setDeadline(ms, total = ms) {
       this.now = Date.now();
       this.turnDeadline = typeof ms === 'number' ? Date.now() + ms : null;
+      // 进度条以整回合时长为满格；重连校准时沿用已知的回合时长
+      if (typeof total === 'number' && total > 0) this.turnTotal = Math.max(total, ms || 0);
     },
 
     // ---------- 服务器事件 ----------
@@ -349,7 +390,7 @@ export default {
     },
     onTurnSync(data) {
       this.currentTurn = data.currentTurn;
-      this.setDeadline(data.remainingMs);
+      this.setDeadline(data.remainingMs, this.turnTotal);
     },
     onAttackResult(data) {
       const { row, col } = data.position || {};
@@ -381,13 +422,13 @@ export default {
           this.sunkCells = cells;
         }
         this.lastAutoMessage = data.auto ? `你超时了，系统代你攻击了 ${label}` : '';
-        this.addLog(`${data.auto ? '（超时代打）' : ''}你攻击 ${label}：${resultText}`, data.result);
+        this.addLog(`${data.auto ? '（超时代打）' : ''}攻击 ${label}：${resultText}`, data.result, 'me');
       } else {
         this.incoming = { ...this.incoming, [k]: data.result };
         if (data.result === 'sink') markSunk(this.me, data.planeIndex);
         if (data.result !== 'miss' && this.activeTab !== 'mine') this.unseenHits += 1;
         this.lastAutoMessage = data.auto ? `${this.enemyName} 超时，系统代其攻击了 ${label}` : '';
-        this.addLog(`${this.enemyName} 攻击 ${label}：${resultText}`, data.result === 'miss' ? 'info' : 'danger');
+        this.addLog(`${data.auto ? '（超时代打）' : ''}攻击 ${label}：${resultText}`, data.result === 'miss' ? 'info' : 'danger', 'op');
       }
     },
     onGameOver(data) {
@@ -537,10 +578,11 @@ export default {
     enemyCellText(row, col) {
       const k = key(row, col);
       const shot = this.myShots[k];
-      if (shot === 'miss') return '·';
-      if (shot === 'hit') return '✕';
-      if (shot === 'sink') return '○';
-      if (!shot && !this.sunkCells[k] && this.marks[k]) return { miss: '·', hit: '✕', sink: '○' }[this.marks[k]];
+      if (shot === 'miss') return this.icons.miss;
+      if (shot === 'hit') return this.icons.hit;
+      if (shot === 'sink') return this.icons.sink;
+      // 猜测标记：排除 / 机身 / 机头，用虚线框和同样的符号表示
+      if (!shot && !this.sunkCells[k] && this.marks[k]) return { miss: '·', hit: this.icons.hit, sink: this.icons.sink }[this.marks[k]];
       return '';
     },
     myCellClass(row, col) {
@@ -549,7 +591,7 @@ export default {
       const classes = [];
       if (this.lastAttack && this.lastAttack.attacker !== this.myId && this.lastAttack.row === row && this.lastAttack.col === col) classes.push('cell-latest');
       if (cell) {
-        classes.push('cell-plane', `plane-${cell.planeIndex}`);
+        classes.push('cell-plane', `pi-${cell.planeIndex}`);
         if (cell.isHead) classes.push('cell-head');
         if (this.me.planes?.[cell.planeIndex]?.sunk) classes.push('cell-plane-sunk');
       }
@@ -559,206 +601,209 @@ export default {
     },
     myCellText(row, col) {
       const hit = this.incoming[key(row, col)];
-      if (hit === 'miss') return '·';
-      if (hit === 'hit') return '✕';
-      if (hit === 'sink') return '○';
+      if (hit === 'miss') return this.icons.miss;
+      if (hit === 'hit') return this.icons.hit;
+      if (hit === 'sink') return this.icons.sink;
       return '';
+    },
+    // 结算页缩略图
+    revealMiniClass(cell) {
+      const plane = this.revealedCells[cell.k];
+      const shot = this.myShots[cell.k];
+      return [plane ? `plane pi-${plane.planeIndex}` : '', plane?.isHead ? 'head' : '', shot && shot !== 'miss' ? 'shot' : ''];
+    },
+    myMiniClass(cell) {
+      const plane = this.myPlaneCells[cell.k];
+      const hit = this.incoming[cell.k];
+      return [plane ? `plane pi-${plane.planeIndex}` : '', plane?.isHead ? 'head' : '', hit && hit !== 'miss' ? 'shot' : ''];
     },
   },
 };
 </script>
-
 <style scoped>
 .game-view {
-  width: 100%;
-  max-width: 1040px;
-  margin: 0 auto;
+  display: grid;
+  gap: 18px;
 }
 
 /* ---------- 状态栏 ---------- */
 .game-status {
   position: sticky;
-  top: 0;
+  top: 70px;
   z-index: 20;
-  background: #fff;
-  border-radius: 12px;
-  padding: 12px 16px;
-  margin-bottom: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  border: 2px solid transparent;
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) auto auto;
+  align-items: center;
+  gap: 22px;
+  padding: 14px 20px;
 }
 
 .game-status.is-my-turn {
-  border-color: var(--secondary-color);
-}
-
-.status-main {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  border-color: color-mix(in srgb, var(--sk-accent) 60%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sk-accent) 22%, var(--sk-surface)), var(--sk-surface));
 }
 
 .status-text {
-  font-size: 1.15rem;
-  font-weight: 600;
+  font-family: var(--sk-font-title);
+  font-size: 18px;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
-.turn-timer {
-  min-width: 52px;
-  text-align: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: #eef6fc;
-  color: var(--primary-color);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.turn-timer.urgent {
-  background: #fdecea;
-  color: var(--danger-color);
-}
-
-.status-sub {
+.timer {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-top: 6px;
-  font-size: 0.9rem;
-  color: #5d6d7e;
+  gap: 12px;
 }
 
-.status-sub b {
-  color: var(--text-color);
-}
-
-.link-btn {
-  margin-left: auto;
-  padding: 4px 10px;
-  font-size: 0.85rem;
-  background: transparent;
-  color: var(--danger-color);
-  border: 1px solid var(--danger-color);
-  box-shadow: none;
-}
-
-.link-btn:hover {
-  background: var(--danger-color);
-  color: #fff;
-  transform: none;
-}
-
-.status-warning,
-.status-note {
-  margin-top: 8px;
-  padding: 6px 10px;
+.timer-bar {
+  flex: 1;
+  height: 6px;
   border-radius: 6px;
-  font-size: 0.85rem;
+  overflow: hidden;
+  background: var(--sk-surface-2);
 }
 
-.status-warning {
-  background: #fff4e5;
-  color: #8a4b00;
+.timer-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--sk-accent), var(--sk-accent-2));
+  transition: width 0.25s linear;
+}
+
+.timer-text {
+  min-width: 36px;
+  color: var(--sk-accent);
+  font-size: 16px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.timer.urgent .timer-bar i {
+  background: var(--sk-warning);
+}
+
+.timer.urgent .timer-text {
+  color: var(--sk-warning);
+  animation: blink 1s steps(2) infinite;
+}
+
+.fleets {
+  display: flex;
+  gap: 18px;
+  color: var(--sk-text-dim);
+  white-space: nowrap;
+}
+
+.fleets b {
+  color: var(--sk-text);
+}
+
+.dots {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.dots i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--sk-success);
+}
+
+.dots i.down {
+  background: var(--sk-danger);
+  opacity: 0.45;
 }
 
 .status-note {
-  background: #f2f4f7;
-  color: #5d6d7e;
+  grid-column: 1 / -1;
+  padding: 6px 12px;
+  border-radius: var(--sk-radius-sm);
+  background: var(--sk-surface-2);
+  color: var(--sk-text-dim);
+  font-size: 13px;
 }
 
-/* ---------- 棋盘 ---------- */
+.status-note.warn {
+  background: color-mix(in srgb, var(--sk-warning) 16%, transparent);
+  color: var(--sk-warning);
+}
+
+/* ---------- 三栏战场 ---------- */
 .board-tabs {
   display: none;
 }
 
-.boards {
+.battle {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr) 280px;
+  gap: 18px;
+  align-items: start;
 }
 
-.board-panel {
-  background: #fff;
-  border-radius: 12px;
-  padding: 14px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+.panel {
   min-width: 0;
+  padding: 16px;
 }
 
-.board-header {
+.panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
-.board-header h3 {
-  font-size: 1.05rem;
+.panel-head h3 {
+  font-size: 16px;
+  font-weight: 800;
 }
 
-.board-hint {
-  margin: 4px 0 10px;
-  font-size: 0.8rem;
-  color: #7f8c8d;
-  min-height: 1.2em;
+.mode-seg button {
+  min-height: 30px;
+  padding: 2px 14px;
 }
 
-.mode-switch {
-  display: inline-flex;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  overflow: hidden;
+.mode-seg button.on {
+  background: var(--sk-accent);
+  color: var(--sk-accent-ink);
 }
 
-.mode-switch button {
-  padding: 5px 14px;
-  font-size: 0.85rem;
-  border-radius: 0;
-  background: #fff;
-  color: var(--text-color);
-  box-shadow: none;
+.hint {
+  margin-bottom: 10px;
+  min-height: 1.5em;
 }
 
-.mode-switch button:hover {
-  transform: none;
-  background: #f2f4f7;
-}
-
-.mode-switch button.active {
-  background: var(--primary-color);
-  color: #fff;
-}
-
-/* 带坐标的 10×10 网格，随容器宽度缩放 */
-.grid-wrap {
+/* 棋盘：坐标 + 10×10，正方形，随栏宽缩放 */
+.board {
   display: grid;
   grid-template-columns: 18px 1fr;
   grid-template-rows: 18px auto;
-  max-width: 440px;
-  margin: 0 auto;
+}
+
+.col-labels,
+.row-labels {
+  display: grid;
+  color: var(--sk-text-dim);
+  font-size: 10px;
+  text-align: center;
 }
 
 .col-labels {
   grid-column: 2;
-  display: grid;
   grid-template-columns: repeat(10, 1fr);
+  align-items: center;
 }
 
 .row-labels {
-  grid-column: 1;
   grid-row: 2;
-  display: grid;
   grid-template-rows: repeat(10, 1fr);
-}
-
-.col-labels span,
-.row-labels span {
-  display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 0.7rem;
-  color: #95a5a6;
 }
 
 .grid {
@@ -766,302 +811,573 @@ export default {
   grid-row: 2;
   display: grid;
   grid-template-columns: repeat(10, 1fr);
-  gap: 2px;
-  background: #e3e8ee;
-  padding: 2px;
-  border-radius: 6px;
+  grid-template-rows: repeat(10, 1fr);
+  aspect-ratio: 1;
+  gap: var(--sk-grid-gap);
+  padding: var(--sk-grid-gap);
+  border-radius: calc(var(--sk-cell-radius) + 6px);
   touch-action: manipulation;
 }
 
+.grid.enemy {
+  background: var(--sk-enemy-line);
+  --cell-bg: var(--sk-enemy-cell);
+}
+
+.grid.mine {
+  background: var(--sk-mine-line);
+  --cell-bg: var(--sk-mine-cell);
+}
+
+/* 雷达特效：对方棋盘中心光晕 */
+html[data-fx-radar] .grid.enemy {
+  background-image: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--sk-accent) 22%, transparent), transparent 70%);
+}
+
+html[data-fx-dashed-grid] .grid {
+  border: 2px solid var(--sk-enemy-line);
+}
+
+html[data-fx-dashed-grid] .grid.mine {
+  border-color: var(--sk-mine-line);
+}
+
 .cell {
-  aspect-ratio: 1;
+  position: relative;
   min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
   padding: 0;
   margin: 0;
-  border: none;
-  border-radius: 3px;
-  background: #f8fafc;
-  color: var(--text-color);
-  font-size: clamp(0.8rem, 3.6vw, 1.1rem);
-  font-weight: 700;
+  border: 0;
+  border-radius: var(--sk-cell-radius);
+  background: var(--cell-bg);
+  color: var(--sk-text);
+  font-size: clamp(11px, 1.4vw, 17px);
+  font-weight: 800;
   line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: none;
-  transition: background-color 0.15s;
-  cursor: default;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-button.cell:hover {
-  transform: none;
-  box-shadow: none;
-  background: #f8fafc;
+html[data-fx-dashed-grid] .cell {
+  border: 0.5px dashed var(--sk-enemy-line);
 }
 
-button.cell:disabled { opacity: 1; }
+html[data-fx-dashed-grid] .grid.mine .cell {
+  border-color: var(--sk-mine-line);
+}
+
+button.cell {
+  cursor: default;
+}
+
+button.cell:disabled {
+  opacity: 1;
+}
 
 .grid.attackable .cell-target {
   cursor: crosshair;
 }
 
-.grid.attackable .cell-target:hover {
-  background: #d6eaf8;
+/* 电脑端悬停预选：显示坐标 */
+@media (hover: hover) {
+  .grid.attackable .cell-target:hover {
+    outline: 2px solid var(--sk-accent);
+    outline-offset: -2px;
+  }
+
+  .grid.attackable .cell-target:hover:empty::after {
+    content: attr(data-coord);
+    color: var(--sk-accent);
+    font-size: 10px;
+  }
 }
 
+.cell-selected-target {
+  outline: 3px solid var(--sk-accent) !important;
+  outline-offset: -3px;
+  background: color-mix(in srgb, var(--sk-accent) 22%, var(--cell-bg));
+}
+
+.cell-selected-target:empty::after {
+  content: attr(data-coord);
+  color: var(--sk-accent);
+  font-size: 10px;
+}
+
+/* 攻击结果 */
 .cell-pending {
-  background: #fef5e7;
-  animation: pulse 0.8s infinite alternate;
+  background: color-mix(in srgb, var(--sk-warning) 25%, var(--cell-bg));
+  animation: pending 0.8s infinite alternate;
 }
 
-.cell-miss {
-  background: #eceff1;
-  color: #90a4ae;
+.cell-miss,
+.cell-incoming-miss {
+  color: var(--sk-miss);
+}
+
+.cell-miss:empty::after,
+.cell-incoming-miss:empty::after {
+  content: '';
+  width: 32%;
+  height: 32%;
+  border-radius: 50%;
+  border: 2px solid var(--sk-miss);
 }
 
 .cell-hit {
-  background: #fadbd8;
-  color: var(--danger-color);
+  background: var(--sk-hit-bg);
+  color: var(--sk-hit);
 }
 
-.cell-sink {
-  background: #1f2d3d;
-  color: #fff;
+.cell-incoming-hit {
+  color: var(--sk-hit);
 }
 
-button.cell-sink:hover,
-.cell-sink {
-  background: #1f2d3d;
+.cell-sink,
+.cell-incoming-sink {
+  background: var(--sk-sink) !important;
+  color: var(--sk-sink-ink);
+}
+
+html[data-fx-glow] .cell-hit,
+html[data-fx-glow] .cell-incoming-hit {
+  text-shadow: 0 0 8px color-mix(in srgb, var(--sk-hit) 80%, transparent);
+}
+
+html[data-fx-glow] .cell-sink,
+html[data-fx-glow] .cell-incoming-sink {
+  box-shadow: 0 0 12px color-mix(in srgb, var(--sk-sink) 80%, transparent);
 }
 
 .cell-sunk-part {
-  background: #c9d1d9;
+  background: var(--sk-wreck);
 }
 
 .cell-hit.cell-in-sunk {
-  background: #e6b0aa;
+  background: color-mix(in srgb, var(--sk-wreck) 60%, var(--sk-hit-bg));
 }
 
 .cell-revealed {
-  background: #d6eaf8;
-  outline: 1px dashed var(--primary-color);
+  background: color-mix(in srgb, var(--sk-danger) 20%, var(--cell-bg));
+  outline: 1px dashed var(--sk-danger);
   outline-offset: -3px;
 }
 
 .cell-mark {
-  color: var(--warning-color);
-  background: #fffaf0;
-  outline: 1px dashed #b9770e;
-  outline-offset: -3px;
+  color: var(--sk-mark);
+  font-size: 0.8em;
+  outline: 1.5px dashed var(--sk-mark);
+  outline-offset: -4px;
+}
+
+/* 最近一次攻击：描边 + 闪动圆圈 */
+.cell-latest {
+  box-shadow: inset 0 0 0 2px var(--sk-latest);
+}
+
+html[data-fx-pulse] .cell-latest::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: calc(var(--sk-cell-radius) + 3px);
+  border: 2px solid var(--sk-latest);
+  animation: ping 1.4s ease-out infinite;
+  pointer-events: none;
+}
+
+/* 我的飞机：三种颜色，机头原色 + 圆点 */
+.cell.pi-0 { --plane: var(--sk-plane-1); }
+.cell.pi-1 { --plane: var(--sk-plane-2); }
+.cell.pi-2 { --plane: var(--sk-plane-3); }
+
+.cell-plane {
+  background: color-mix(in srgb, var(--plane) 58%, var(--sk-mine-cell));
+}
+
+.cell-plane.cell-head {
+  background: var(--plane);
+}
+
+.cell-plane.cell-head:empty::before {
+  content: '';
+  width: 32%;
+  height: 32%;
+  border-radius: 50%;
+  background: var(--sk-head-dot);
+}
+
+.cell-plane-sunk {
+  filter: grayscale(0.85);
+  opacity: 0.6;
 }
 
 .attack-controls {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  margin: 12px auto 0;
-  max-width: 440px;
+  margin-top: 12px;
 }
 
 .quick-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0;
-  font-size: 0.8rem;
-  color: #526579;
+  color: var(--sk-text-dim);
+  font-size: 13px;
+  cursor: pointer;
 }
 
-.quick-toggle input { width: 18px; height: 18px; }
-.confirm-attack { min-width: 140px; }
-.cell-selected-target { outline: 3px solid #1682c4; outline-offset: -3px; background: #d6eaf8; }
-.cell-latest { box-shadow: inset 0 0 0 2px #e67e22; }
-button.cell-latest:hover { box-shadow: inset 0 0 0 2px #e67e22; }
-.last-attack { margin-top: 12px; padding: 10px 14px; background: #eaf4fb; border-radius: 8px; font-size: 0.9rem; color: #245b80; }
-
-/* 我的棋盘：三架飞机三种颜色，机头加深 */
-.cell-plane.plane-0 { background: #aed6f1; }
-.cell-plane.plane-1 { background: #a9dfbf; }
-.cell-plane.plane-2 { background: #f5cba7; }
-.cell-plane.cell-head.plane-0 { background: #3498db; }
-.cell-plane.cell-head.plane-1 { background: #27ae60; }
-.cell-plane.cell-head.plane-2 { background: #e67e22; }
-
-.cell-plane-sunk {
-  filter: grayscale(0.8);
-  opacity: 0.7;
+.quick-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--sk-accent);
 }
 
-.cell-incoming-miss { color: #90a4ae; }
-.cell-incoming-hit { color: var(--danger-color); }
-.cell-incoming-sink { color: #fff; background: #1f2d3d !important; }
+.confirm-attack {
+  min-width: 140px;
+}
 
 .legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
-  margin-top: 10px;
-  font-size: 0.78rem;
-  color: #7f8c8d;
   justify-content: center;
+  gap: 6px 14px;
+  margin-top: 12px;
+  color: var(--sk-text-dim);
+  font-size: 12px;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .lg {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  --cell-bg: var(--sk-enemy-cell);
   width: 18px;
   height: 18px;
-  margin-right: 4px;
-  border-radius: 3px;
+  font-size: 11px;
   font-style: normal;
-  font-weight: 700;
 }
-
-.lg-miss { background: #eceff1; color: #90a4ae; }
-.lg-hit { background: #fadbd8; color: var(--danger-color); }
-.lg-sink { background: #1f2d3d; color: #fff; }
-.lg-mark { background: #fffaf0; color: var(--warning-color); }
 
 /* ---------- 对局记录 ---------- */
-.game-log {
-  margin-top: 12px;
-  background: #fff;
-  border-radius: 12px;
-  padding: 10px 14px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-  font-size: 0.85rem;
+.log-panel {
+  position: sticky;
+  top: 160px;
 }
 
-.game-log summary {
-  cursor: pointer;
+.last-attack {
+  margin-bottom: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--sk-latest);
+  border-radius: var(--sk-radius-sm);
+  background: color-mix(in srgb, var(--sk-latest) 12%, transparent);
+  font-size: 13px;
   font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.log-latest {
-  font-weight: 400;
-  color: #7f8c8d;
-}
-
-.game-log ol {
+.log {
   list-style: none;
-  margin-top: 8px;
-  max-height: 220px;
+  display: grid;
+  gap: 6px;
+  max-height: 460px;
   overflow-y: auto;
 }
 
-.game-log li {
-  padding: 3px 0;
-  border-bottom: 1px dashed #eef1f4;
+.log li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--sk-radius-sm);
+  background: var(--sk-surface-2);
+  font-size: 12px;
 }
 
-.log-danger { color: var(--danger-color); }
-.log-sink { color: #1f2d3d; font-weight: 600; }
-.log-warn { color: #8a4b00; }
-.log-system { color: var(--primary-color); }
+.tag {
+  flex-shrink: 0;
+  max-width: 5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
 
-/* ---------- 结束 ---------- */
+.who-me .tag {
+  background: color-mix(in srgb, var(--sk-accent) 20%, transparent);
+  color: var(--sk-accent);
+}
+
+.who-op .tag {
+  background: color-mix(in srgb, var(--sk-hit) 18%, transparent);
+  color: var(--sk-hit);
+}
+
+.log-sink,
+.log-success {
+  color: var(--sk-success);
+  font-weight: 700;
+}
+
+.log-danger {
+  color: var(--sk-danger);
+}
+
+.log-warn {
+  color: var(--sk-warning);
+}
+
+.log-system {
+  color: var(--sk-text-dim);
+}
+
+/* ---------- 结算 ---------- */
 .game-overlay {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   padding: 16px;
-  background: rgba(15, 23, 42, 0.5);
+  background: var(--sk-overlay);
+  backdrop-filter: blur(3px);
 }
 
 .game-result {
-  width: min(100%, 380px);
-  background: #fff;
-  border-radius: 14px;
-  padding: 24px 20px;
+  display: grid;
+  grid-template-columns: 210px 1fr;
+  gap: 28px;
+  align-items: center;
+  width: min(100%, 680px);
+  padding: 28px 32px;
+  border: 1px solid var(--sk-line);
+  border-radius: calc(var(--sk-radius) + 6px);
+  background: var(--sk-surface);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}
+
+.result-hero {
   text-align: center;
 }
 
-.game-result h2 {
-  font-size: 1.6rem;
-  margin-bottom: 8px;
+.medal {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  height: 112px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  font-size: 50px;
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--sk-danger) 25%, #fff), var(--sk-danger) 70%);
+  box-shadow: 0 0 0 8px color-mix(in srgb, var(--sk-danger) 18%, transparent);
 }
 
-.result-reason,
-.result-stats {
-  color: #5d6d7e;
-  margin-bottom: 6px;
+.game-result.win .medal {
+  background: radial-gradient(circle at 35% 30%, #fff5cf, #ffc94a 55%, #d9901a);
+  box-shadow: 0 0 0 8px rgba(255, 201, 74, 0.2), 0 12px 34px rgba(255, 181, 71, 0.45);
 }
 
-.result-rematch {
-  margin: 10px 0 0;
-  padding: 6px 10px;
+.result-hero h2 {
+  font-size: 32px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: var(--sk-danger);
+}
+
+.game-result.win .result-hero h2 {
+  color: #f5b82e;
+}
+
+html[data-fx-glow] .game-result.win .result-hero h2 {
+  text-shadow: 0 0 20px rgba(255, 201, 74, 0.55);
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.kpis div {
+  display: grid;
+  padding: 12px;
+  border-radius: var(--sk-radius-sm);
+  background: var(--sk-surface-2);
+  text-align: center;
+}
+
+.kpis b {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpis span {
+  color: var(--sk-text-dim);
+  font-size: 11px;
+}
+
+.minis {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.minis > div {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+}
+
+.mini-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 1px;
+  width: 128px;
+  aspect-ratio: 1;
+  padding: 1px;
   border-radius: 6px;
-  background: #e8f8f0;
-  color: #1e8449;
 }
 
-.result-actions,
-.after-game-bar {
+.mini-grid.enemy {
+  background: var(--sk-enemy-line);
+  --cell-bg: var(--sk-enemy-cell);
+}
+
+.mini-grid.mine {
+  background: var(--sk-mine-line);
+  --cell-bg: var(--sk-mine-cell);
+}
+
+.mini {
+  border-radius: 2px;
+  background: var(--cell-bg);
+}
+
+.mini.pi-0 { --plane: var(--sk-plane-1); }
+.mini.pi-1 { --plane: var(--sk-plane-2); }
+.mini.pi-2 { --plane: var(--sk-plane-3); }
+
+.mini.plane {
+  background: color-mix(in srgb, var(--plane) 58%, var(--cell-bg));
+}
+
+.mini.plane.head {
+  background: var(--plane);
+}
+
+.mini.shot {
+  box-shadow: inset 0 0 0 1.5px var(--sk-hit);
+}
+
+.rematch {
+  margin-bottom: 10px;
+  color: var(--sk-success);
+  font-weight: 700;
+}
+
+.result-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  justify-content: center;
-  margin-top: 16px;
+}
+
+.result-actions .btn-primary {
+  flex: 1;
 }
 
 .after-game-bar {
   position: sticky;
-  bottom: 0;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  background: #fff;
-  border-radius: 12px;
-  padding: 10px;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
 }
 
-.btn-secondary {
-  background: #ecf0f1;
-  color: var(--text-color);
+@keyframes ping {
+  from { transform: scale(0.85); opacity: 0.9; }
+  to { transform: scale(1.45); opacity: 0; }
 }
 
-.btn-secondary:hover {
-  background: #dfe6e9;
-}
-
-@keyframes pulse {
-  from { opacity: 0.5; }
+@keyframes pending {
+  from { opacity: 0.55; }
   to { opacity: 1; }
+}
+
+@keyframes blink {
+  50% { opacity: 0.5; }
+}
+
+/* ---------- 中等宽度：记录栏移到下方 ---------- */
+@media (max-width: 1180px) {
+  .battle {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  }
+
+  .log-panel {
+    position: static;
+    grid-column: 1 / -1;
+  }
+
+  .log {
+    max-height: 220px;
+  }
 }
 
 /* ---------- 手机：一次只显示一个棋盘 ---------- */
 @media (max-width: 760px) {
+  .game-view {
+    gap: 10px;
+  }
+
+  .game-status {
+    top: 54px;
+    grid-template-columns: 1fr auto;
+    gap: 8px 12px;
+    padding: 10px 12px;
+  }
+
+  .status-text {
+    font-size: 15px;
+    white-space: normal;
+  }
+
+  .timer {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .fleets {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    gap: 14px;
+    font-size: 12px;
+  }
+
+  .game-status > .btn {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
   .board-tabs {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    margin-bottom: 10px;
   }
 
   .board-tabs button {
     position: relative;
-    padding: 9px 0;
-    background: #fff;
-    color: var(--text-color);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
-  }
-
-  .board-tabs button:hover {
-    transform: none;
-  }
-
-  .board-tabs button.active {
-    background: var(--primary-color);
-    color: #fff;
+    min-height: 38px;
+    font-weight: 700;
   }
 
   .tab-dot {
@@ -1070,7 +1386,7 @@ button.cell-latest:hover { box-shadow: inset 0 0 0 2px #e67e22; }
     height: 8px;
     margin-left: 6px;
     border-radius: 50%;
-    background: var(--secondary-color);
+    background: var(--sk-success);
     vertical-align: middle;
   }
 
@@ -1080,17 +1396,18 @@ button.cell-latest:hover { box-shadow: inset 0 0 0 2px #e67e22; }
     margin-left: 6px;
     padding: 0 5px;
     border-radius: 9px;
-    background: var(--danger-color);
+    background: var(--sk-danger);
     color: #fff;
-    font-size: 0.75rem;
+    font-size: 11px;
     line-height: 18px;
   }
 
-  .boards {
+  .battle {
     grid-template-columns: 1fr;
+    gap: 10px;
   }
 
-  .board-panel {
+  .panel {
     padding: 10px;
   }
 
@@ -1098,19 +1415,41 @@ button.cell-latest:hover { box-shadow: inset 0 0 0 2px #e67e22; }
     display: none;
   }
 
-  .status-text {
-    font-size: 1rem;
+  .board {
+    grid-template-columns: 14px 1fr;
+    grid-template-rows: 14px auto;
   }
 
-  .status-sub {
-    gap: 10px;
-    font-size: 0.82rem;
+  .cell {
+    font-size: clamp(11px, 3.6vw, 15px);
   }
-}
 
-@media (prefers-reduced-motion: reduce) {
-  .cell-pending {
-    animation: none;
+  .log {
+    max-height: 180px;
+  }
+
+  .game-result {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 20px 18px;
+  }
+
+  .medal {
+    width: 80px;
+    height: 80px;
+    font-size: 36px;
+  }
+
+  .result-hero h2 {
+    font-size: 26px;
+  }
+
+  .minis {
+    justify-content: center;
+  }
+
+  .mini-grid {
+    width: 118px;
   }
 }
 </style>

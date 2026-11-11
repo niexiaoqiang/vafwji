@@ -21,6 +21,17 @@
 - 战绩：本机记录联机 / 人机胜负、命中率和最少攻击获胜（微应用使用社区存储）
 - 防作弊：飞机布局由服务端校验；开局时只下发自己的布局，对方飞机仅在击落时公开
 
+### 皮肤
+
+顶栏「🎨 皮肤」可切换皮肤，默认跟随系统深浅色，选择会自动保存。内置「夜空雷达」「晴空纸面」「经典蓝」三套。皮肤只改颜色、字体、图标和特效，不改变布局。
+
+制作新皮肤：复制 `src/skins/_template.js`，按 [docs/skins.md](docs/skins.md) 填写后运行：
+
+```bash
+npm run skins:check     # 校验规范与对比度
+npm run skins:preview   # 生成 dist/skins-preview.html 对比预览
+```
+
 ### 操作与恢复
 
 - 进入房间时预先随机布置三架飞机，可以拖动、旋转或重新随机；手机端将准备和开始按钮集中在棋盘下方的吸底操作区。人机点击「准备并开始」后，电脑准备完成即自动开局。
@@ -56,7 +67,8 @@ GAME_TEST_URL=http://127.0.0.1:5174 node tests/ui-smoke.mjs
 | `server/realtime.js` | 基于 `ws` 的轻量实时层，支持断线续接 |
 | `server/mini-app-auth.js` | 微应用平台 JWT 校验 |
 | `src/local/` | 人机对战：浏览器内运行同一对局引擎 + 电脑玩家（`ai.js` 概率推理） |
-| `src/components/` | 大厅、房间（布置飞机）、对局、规则弹窗 |
+| `src/components/` | 大厅、房间（布置飞机）、对局、规则弹窗、皮肤选择 |
+| `src/skins/` | 皮肤规范（`schema.js`）、注册与切换（`index.js`）、内置皮肤与模板 |
 | `src/net/socket.js` | 客户端实时连接（网页版原生 WebSocket / 微应用 SDK） |
 
 ## 技术栈
