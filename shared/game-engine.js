@@ -158,7 +158,20 @@ export class GameEngine {
     if (!room) return { success: false, message: '你不在房间中' };
     const state = this.roomState(room);
     this.send(client.id, 'roomState', state);
-    return { success: true, roomId: room.id, state };
+    const player = room.players.find((p) => p.id === client.id);
+    return {
+      success: true, roomId: room.id, state,
+      ownPlanes: player?.planes || [],
+      game: room.gameId && (!room.result || room.resultPlayers.some((p) => p.id === client.id)) ? {
+        gameId: room.gameId, roomId: room.id, currentTurn: room.currentTurn,
+        turnMs: Math.max(0, room.turnDeadline - Date.now()),
+        players: (room.resultPlayers || room.players).map((p) => ({
+          ...this.publicPlayer(p),
+          planes: p.id === client.id ? p.planes : (p.planes || []).map((plane) => ({ sunk: plane.sunk })),
+        })),
+        history: room.history || [], result: room.result || null,
+      } : null,
+    };
   }
 
   leaveRoom(clientId, reason) {
@@ -166,6 +179,12 @@ export class GameEngine {
     const client = this.clients.get(clientId);
     if (client) client.roomId = null;
     if (!room || !player) return { success: true };
+    // 先结算再移除成员，双方都能收到结果和完整布局。
+    if (room.phase === 'playing') {
+      const opponent = room.players.find((p) => p.id !== clientId);
+      this.finishGame(room, opponent.id, `${player.username} 离开了游戏`);
+    }
+    const result = room.result || null;
     room.players = room.players.filter((p) => p.id !== clientId);
     this.log(`${player.username} 离开房间 ${room.id}`);
     if (room.players.length === 0) {
@@ -175,9 +194,6 @@ export class GameEngine {
       const rest = room.players[0];
       if (room.leaderId === clientId) room.leaderId = rest.id;
       this.send(rest.id, 'playerLeft', { playerId: clientId, username: player.username });
-      if (room.phase === 'playing') {
-        this.finishGame(room, rest.id, reason);
-      }
       if (room.phase === 'finished') {
         // 只剩一人时回到等待阶段，准备状态清零
         room.phase = 'waiting';
@@ -187,7 +203,7 @@ export class GameEngine {
       this.broadcastRoom(room);
     }
     this.broadcastRooms();
-    return { success: true };
+    return { success: true, result };
   }
 
   // ---------------------------------------------------------------- 准备与开局
@@ -225,10 +241,15 @@ export class GameEngine {
     room.shots = {};
     room.timeouts = {};
     room.startedAt = Date.now();
+    room.gameId = `${room.id}-${room.startedAt}-${Math.random().toString(36).slice(2)}`;
+    room.history = [];
+    room.result = null;
+    room.resultPlayers = null;
     room.players.forEach((p) => p.planes.forEach((plane) => { plane.sunk = false; }));
     const first = room.players[Math.floor(Math.random() * 2)];
     for (const viewer of room.players) {
       this.send(viewer.id, 'gameStart', {
+        gameId: room.gameId,
         roomId: room.id,
         currentTurn: first.id,
         turnMs: this.turnMs,
@@ -266,10 +287,13 @@ export class GameEngine {
     const shots = (room.shots[attackerId] = room.shots[attackerId] || new Set());
     const k = cellKey(row, col);
     if (shots.has(k)) return '这个格子已经攻击过了';
+    const opponent = room.players.find((p) => p.id !== attackerId);
+    if (opponent.planes.some((plane) => plane.sunk && plane.coordinates.some((c) => c.row === row && c.col === col))) {
+      return '这架飞机已经击落，请选择其他格子';
+    }
     shots.add(k);
     if (!auto) room.timeouts[attackerId] = 0;
 
-    const opponent = room.players.find((p) => p.id !== attackerId);
     let result = 'miss';
     let planeIndex = -1;
     opponent.planes.forEach((plane, index) => {
@@ -284,7 +308,12 @@ export class GameEngine {
       opponent.planes[planeIndex].sunk = true;
       sunkPlane = opponent.planes[planeIndex].coordinates; // 只公开被击落的这架
     }
-    this.toRoom(room, 'attackResult', { attacker: attackerId, position: { row, col }, result, planeIndex, sunkPlane, auto });
+    // 普通命中不能透露属于哪架飞机。历史也只存双方可见的信息。
+    const event = { attacker: attackerId, position: { row, col }, result, auto,
+      ...(result === 'sink' ? { planeIndex, sunkPlane } : {}),
+    };
+    room.history.push(event);
+    this.toRoom(room, 'attackResult', event);
 
     if (opponent.planes.every((plane) => plane.sunk)) {
       this.finishGame(room, attackerId);
@@ -316,25 +345,30 @@ export class GameEngine {
     }
     const shots = room.shots[playerId] || new Set();
     const free = [];
+    const wrecks = new Set(opponent.planes.filter((p) => p.sunk).flatMap((p) => p.coordinates.map((c) => cellKey(c.row, c.col))));
     for (let row = 1; row <= 10; row++) {
-      for (const col of COLUMNS) if (!shots.has(cellKey(row, col))) free.push({ row, col });
+      for (const col of COLUMNS) if (!shots.has(cellKey(row, col)) && !wrecks.has(cellKey(row, col))) free.push({ row, col });
     }
     if (free.length) this.performAttack(room.id, playerId, free[Math.floor(Math.random() * free.length)], { auto: true });
   }
 
   finishGame(room, winner, reason) {
+    if (room.phase !== 'playing') return;
     this.clearTurnTimer(room);
     room.phase = 'finished';
     room.currentTurn = null;
     room.players.forEach((p) => { p.ready = false; });
     const reveal = room.players.map((p) => ({ id: p.id, planes: p.planes || [] }));
-    this.toRoom(room, 'gameOver', {
+    room.resultPlayers = room.players.map((p) => ({ ...p }));
+    room.result = {
+      gameId: room.gameId,
       winner,
       reason: reason || '',
       roomId: room.id,
       reveal,
       durationMs: room.startedAt ? Date.now() - room.startedAt : 0,
-    });
+    };
+    this.toRoom(room, 'gameOver', room.result);
     const name = room.players.find((p) => p.id === winner)?.username || winner;
     this.log(`房间 ${room.id} 对局结束，胜者 ${name}${reason ? `（${reason}）` : ''}`);
     this.broadcastRoom(room);
@@ -346,6 +380,10 @@ export class GameEngine {
     if (!player) return this.fail(client, '你不在房间中');
     if (room.phase === 'playing') return this.fail(client, '对局进行中');
     this.toOthers(room, client.id, 'rematchRequested', { playerId: client.id, username: player.username });
+    room.gameId = null;
+    room.history = [];
+    room.result = null;
+    room.resultPlayers = null;
     // 双方都会点“再来一局”：第一位到达时重置；后到者不能清掉先到者已摆好的布局
     if (room.phase === 'finished') {
       room.phase = 'waiting';

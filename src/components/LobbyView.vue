@@ -58,7 +58,7 @@
         <div><b>{{ aiWins }}</b><span>人机胜</span></div>
         <div><b>{{ hitRate }}</b><span>命中率</span></div>
       </div>
-      <p v-if="stats.best" class="hint">最快获胜：{{ stats.best }} 次攻击</p>
+      <p v-if="stats.best" class="hint">最少攻击获胜：{{ stats.best }} 次攻击</p>
     </section>
   </div>
 </template>

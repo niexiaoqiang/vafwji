@@ -125,6 +125,7 @@ export default {
       this.netSocket.on('reconnect', () => {
         this.connectionLost = false;
         if (this.mode === 'online' && this.view !== 'lobby') notify('已重新连接');
+        this.restoreSession();
       });
       // 重连成功但原会话已过期：服务器已判定离开，回到大厅
       this.netSocket.on('session_lost', () => {
@@ -132,6 +133,21 @@ export default {
         if (this.mode === 'online' && this.view !== 'lobby') {
           notify('断线时间过长，已离开房间');
           this.backToLobby();
+        }
+      });
+    },
+    restoreSession() {
+      this.netSocket.emit('syncRoom', {}, (res) => {
+        if (!res?.success || this.mode !== 'online') return;
+        const me = res.state.players.find((p) => p.id === this.netSocket.id);
+        this.roomId = res.roomId;
+        this.username = me?.username || this.username;
+        // 同一页面重连由事件补发恢复；刷新后的大厅需要完整快照。
+        if (this.view !== 'lobby') return;
+        if (res.game && (res.state.phase !== 'waiting' || res.game.result)) {
+          this.onGameStart(res.game);
+        } else {
+          this.openRoom(res.roomId, this.username, { ...res.state, ownPlanes: res.ownPlanes });
         }
       });
     },
@@ -320,6 +336,15 @@ button:active {
   transform: translateY(0);
   box-shadow: 0 2px 3px rgba(0, 0, 0, 0.1);
 }
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none;
+  box-shadow: none;
+}
+
+button:focus-visible { outline: 3px solid #f39c12; outline-offset: 3px; }
 
 button.secondary {
   background-color: var(--secondary-color);

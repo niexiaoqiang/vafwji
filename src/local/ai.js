@@ -39,7 +39,7 @@ export class PlaneHunter {
   next() {
     const open = [];
     for (let row = 1; row <= 10; row++) {
-      for (const col of COLUMNS) if (!this.shots.has(key(row, col))) open.push({ row, col });
+      for (const col of COLUMNS) if (!this.shots.has(key(row, col)) && !this.sunkCells.has(key(row, col))) open.push({ row, col });
     }
     if (this.random() < this.level.randomRate) {
       return open[Math.floor(this.random() * open.length)];

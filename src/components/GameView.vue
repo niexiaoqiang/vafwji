@@ -11,7 +11,7 @@
       <div class="status-sub">
         <span>对方飞机 <b>{{ enemyAlive }}</b>/{{ planeCount }}</span>
         <span>我方飞机 <b>{{ myAlive }}</b>/{{ planeCount }}</span>
-        <button type="button" class="link-btn" @click="leaveGame">退出</button>
+        <button type="button" class="link-btn" :disabled="leaving" @click="leaveGame">{{ leaving ? '退出中…' : '退出' }}</button>
       </div>
       <div v-if="opponentOffline && !gameOver" class="status-warning">
         {{ enemyName }} 掉线了，正在等待重连…
@@ -52,7 +52,7 @@
           </div>
         </div>
         <p class="board-hint">
-          {{ clickMode === 'attack' ? '点击格子发起攻击；击中机头可继续攻击' : '点击格子做标记：· → ✕ → ○ → 清除（电脑上也可右键标记）' }}
+          {{ clickMode === 'attack' ? (quickAttack ? '快速攻击已开启：点击格子立即攻击' : '先选择坐标，再确认攻击；击中机头可连击') : '虚线是你的猜测：排除 → 机身 → 机头 → 清除' }}
         </p>
         <div class="grid-wrap">
           <div class="col-labels"><span v-for="col in columns" :key="col">{{ col }}</span></div>
@@ -66,11 +66,19 @@
                 class="cell"
                 :class="enemyCellClass(row, col)"
                 :aria-label="`${col}${row}`"
+                :aria-pressed="selectedTarget?.row === row && selectedTarget?.col === col"
+                :disabled="gameOver || !!myShots[keyFor(row, col)] || !!sunkCells[keyFor(row, col)]"
                 @click="onEnemyCell(row, col)"
                 @contextmenu.prevent="cycleMark(row, col)"
               >{{ enemyCellText(row, col) }}</button>
             </template>
           </div>
+        </div>
+        <div v-if="!gameOver && clickMode === 'attack'" class="attack-controls">
+          <label class="quick-toggle"><input v-model="quickAttack" type="checkbox" />快速攻击</label>
+          <button v-if="!quickAttack" type="button" class="confirm-attack" :disabled="!canAttack || !selectedTarget" @click="attack(selectedTarget.row, selectedTarget.col)">
+            {{ selectedTarget ? `攻击 ${selectedTarget.col}${selectedTarget.row}` : '请选择坐标' }}
+          </button>
         </div>
         <div class="legend">
           <span><i class="lg lg-miss">·</i>未命中</span>
@@ -103,6 +111,7 @@
       </section>
     </div>
 
+    <p v-if="lastAttackText" class="last-attack" role="status">{{ lastAttackText }}</p>
     <!-- 对局记录 -->
     <details class="game-log">
       <summary>对局记录<span v-if="logs.length" class="log-latest">：{{ logs[0].text }}</span></summary>
@@ -159,6 +168,12 @@ export default {
   data() {
     return {
       columns: COLUMNS,
+      gameId: null,
+      leaving: false,
+      selectedTarget: null,
+      quickAttack: storage.getItem('quickAttack') === 'true',
+      lastAttack: null,
+      lastAttackText: '',
       myId: null,
       players: [],
       currentTurn: null,
@@ -253,6 +268,11 @@ export default {
     },
   },
   watch: {
+    quickAttack(value) {
+      storage.setItem('quickAttack', String(value));
+      this.selectedTarget = null;
+    },
+    clickMode() { this.selectedTarget = null; },
     isYourTurn(mine) {
       // 轮到自己时切回对方棋盘
       if (mine && !this.gameOver) this.activeTab = 'enemy';
@@ -304,18 +324,24 @@ export default {
       if (this.logs.length > 60) this.logs.pop();
     },
     setDeadline(ms) {
+      this.now = Date.now();
       this.turnDeadline = typeof ms === 'number' ? Date.now() + ms : null;
     },
 
     // ---------- 服务器事件 ----------
     onGameStart(data) {
+      this.gameId = data.gameId;
       this.players = (data.players || []).map((p) => ({ ...p, planes: (p.planes || []).map((plane) => ({ ...plane })) }));
       this.currentTurn = data.currentTurn || data.firstPlayer;
       this.setDeadline(data.turnMs);
       const first = this.players.find((p) => p.id === this.currentTurn);
       this.addLog(`对局开始：${this.me.username || '我'} vs ${this.enemyName}，${first?.id === this.myId ? '你' : first?.username || '对方'}先手`, 'system');
+      this.opponentOffline = !!this.enemy.offline;
+      for (const event of data.history || []) this.onAttackResult(event);
+      if (data.result) this.onGameOver(data.result);
     },
     onTurnChange(data) {
+      this.selectedTarget = null;
       this.currentTurn = data.currentTurn;
       this.isAttacking = false;
       this.setDeadline(data.turnMs);
@@ -330,6 +356,8 @@ export default {
       const k = key(row, col);
       const label = `${col}${row}`;
       const resultText = { miss: '未命中', hit: '命中机身', sink: '击落一架飞机' }[data.result] || data.result;
+      this.lastAttack = { ...data.position, attacker: data.attacker };
+      this.lastAttackText = `${data.attacker === this.myId ? '你' : this.enemyName}攻击 ${label}：${resultText}${data.auto ? '（超时代打）' : ''}`;
       const markSunk = (list, planeIndex) => {
         const plane = list.planes?.[planeIndex];
         if (plane) plane.sunk = true;
@@ -363,6 +391,7 @@ export default {
       }
     },
     onGameOver(data) {
+      if (this.gameOver) return;
       this.gameOver = true;
       this.showResult = true;
       this.winner = data.winner;
@@ -373,7 +402,9 @@ export default {
       if (enemyReveal) this.revealed = enemyReveal.planes;
       this.durationMs = data.durationMs || 0;
       this.addLog(this.winner === this.myId ? '你赢得了这局' : `这局 ${this.enemyName} 获胜`, 'system');
-      recordResult({
+      this.resultWrite = recordResult({
+        gameId: data.gameId || this.gameId,
+        reason: data.reason,
         mode: this.mode,
         level: this.level,
         win: this.winner === this.myId,
@@ -403,7 +434,9 @@ export default {
         this.cycleMark(row, col);
         return;
       }
-      this.attack(row, col);
+      if (!this.canAttack || this.myShots[key(row, col)] || this.sunkCells[key(row, col)]) return;
+      if (this.quickAttack) this.attack(row, col);
+      else this.selectedTarget = { row, col };
     },
     attack(row, col) {
       if (this.gameOver) return;
@@ -413,6 +446,7 @@ export default {
       }
       if (this.isAttacking) return;
       const k = key(row, col);
+      if (this.sunkCells[k]) return;
       if (this.myShots[k]) {
         notify('这个格子已经攻击过了');
         return;
@@ -422,6 +456,7 @@ export default {
         return;
       }
       this.isAttacking = true;
+      this.selectedTarget = null;
       this.myShots = { ...this.myShots, [k]: 'pending' };
       this.socket.emit('attack', { position: { row, col } });
       clearTimeout(this.pendingTimer);
@@ -437,7 +472,7 @@ export default {
     },
     cycleMark(row, col) {
       const k = key(row, col);
-      if (this.myShots[k] || this.gameOver) return;
+      if (this.myShots[k] || this.sunkCells[k] || this.gameOver) return;
       const next = MARK_CYCLE[this.marks[k]];
       const marks = { ...this.marks };
       if (next) marks[k] = next;
@@ -455,8 +490,23 @@ export default {
       });
     },
     backToLobby() {
-      this.socket.emit('leaveRoom', {});
-      this.$emit('endGame');
+      if (this.leaving) return;
+      if (!this.socket.connected) {
+        if (this.gameOver) this.$emit('endGame');
+        else notify('连接中断，恢复连接后可退出并结算');
+        return;
+      }
+      this.leaving = true;
+      this.socket.emit('leaveRoom', {}, async (res) => {
+        if (!res?.success) {
+          this.leaving = false;
+          notify(res?.message || '退出失败，请重试');
+          return;
+        }
+        if (res.result && !this.gameOver) this.onGameOver(res.result);
+        await this.resultWrite;
+        this.$emit('endGame');
+      });
     },
     async leaveGame() {
       if (this.gameOver) {
@@ -469,16 +519,19 @@ export default {
     },
 
     // ---------- 渲染 ----------
+    keyFor: key,
     enemyCellClass(row, col) {
       const k = key(row, col);
       const shot = this.myShots[k];
       const classes = [];
+      if (this.selectedTarget?.row === row && this.selectedTarget?.col === col) classes.push('cell-selected-target');
+      if (this.lastAttack?.attacker === this.myId && this.lastAttack.row === row && this.lastAttack.col === col) classes.push('cell-latest');
       if (shot) classes.push(`cell-${shot}`);
       else if (this.sunkCells[k]) classes.push('cell-sunk-part');
       else if (this.revealed && this.revealedCells[k]) classes.push('cell-revealed');
       else if (this.marks[k]) classes.push(`cell-mark cell-mark-${this.marks[k]}`);
       if (this.sunkCells[k] && shot) classes.push('cell-in-sunk');
-      if (!shot && this.canAttack && this.clickMode === 'attack') classes.push('cell-target');
+      if (!shot && !this.sunkCells[k] && this.canAttack && this.clickMode === 'attack') classes.push('cell-target');
       return classes;
     },
     enemyCellText(row, col) {
@@ -494,6 +547,7 @@ export default {
       const k = key(row, col);
       const cell = this.myPlaneCells[k];
       const classes = [];
+      if (this.lastAttack && this.lastAttack.attacker !== this.myId && this.lastAttack.row === row && this.lastAttack.col === col) classes.push('cell-latest');
       if (cell) {
         classes.push('cell-plane', `plane-${cell.planeIndex}`);
         if (cell.isHead) classes.push('cell-head');
@@ -747,6 +801,8 @@ button.cell:hover {
   background: #f8fafc;
 }
 
+button.cell:disabled { opacity: 1; }
+
 .grid.attackable .cell-target {
   cursor: crosshair;
 }
@@ -797,7 +853,34 @@ button.cell-sink:hover,
 .cell-mark {
   color: var(--warning-color);
   background: #fffaf0;
+  outline: 1px dashed #b9770e;
+  outline-offset: -3px;
 }
+
+.attack-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 12px auto 0;
+  max-width: 440px;
+}
+
+.quick-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.8rem;
+  color: #526579;
+}
+
+.quick-toggle input { width: 18px; height: 18px; }
+.confirm-attack { min-width: 140px; }
+.cell-selected-target { outline: 3px solid #1682c4; outline-offset: -3px; background: #d6eaf8; }
+.cell-latest { box-shadow: inset 0 0 0 2px #e67e22; }
+button.cell-latest:hover { box-shadow: inset 0 0 0 2px #e67e22; }
+.last-attack { margin-top: 12px; padding: 10px 14px; background: #eaf4fb; border-radius: 8px; font-size: 0.9rem; color: #245b80; }
 
 /* 我的棋盘：三架飞机三种颜色，机头加深 */
 .cell-plane.plane-0 { background: #aed6f1; }

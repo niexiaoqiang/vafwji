@@ -29,7 +29,6 @@
         等待对手加入…把房间号发给朋友吧
       </div>
       <div class="room-actions">
-        <button v-if="isLeader && canStartGame" class="btn-primary" @click="startGame">开始游戏</button>
         <button class="btn-danger" @click="leaveRoom">离开房间</button>
       </div>
     </div>
@@ -37,7 +36,7 @@
     <div class="card setup-board">
       <h2>放置飞机</h2>
       <p class="setup-instruction">
-        先点「随机布置」，再拖动飞机调整位置；点一下飞机选中后可以旋转（电脑上也可右键旋转）
+        {{ planes.length ? '已为你布置 3 架飞机。拖动调整位置，选中后旋转；也可以换一组布局。' : '点击「随机布置」生成布局，再拖动、旋转调整。' }}
       </p>
 
       <div class="board-container">
@@ -70,8 +69,9 @@
           <button class="btn-secondary" @click="generateRandomPlanes" :disabled="isReady">随机布置</button>
           <button class="btn-secondary" @click="rotateSelected" :disabled="isReady || selectedPlaneIndex === -1">旋转所选</button>
           <button class="btn-secondary" @click="clearPlanes" :disabled="isReady">清除</button>
-          <button v-if="!isReady" class="btn-primary" @click="ready" :disabled="planes.length < 3">准备</button>
-          <button v-else-if="phase === 'waiting'" class="btn-secondary" @click="unready">重新布置</button>
+          <button v-if="!isReady" class="btn-primary" @click="ready" :disabled="planes.length < 3 || preparing">{{ preparing ? '提交中…' : isAi ? '准备并开始' : '准备' }}</button>
+          <button v-else-if="phase === 'waiting'" class="btn-secondary" :disabled="preparing || starting" @click="unready">重新布置</button>
+          <button v-if="!isAi && isLeader && canStartGame" class="btn-primary" :disabled="starting" @click="startGame">开始游戏</button>
         </div>
         <p class="setup-tip" v-if="isReady">{{ readyTip }}</p>
       </div>
@@ -104,8 +104,10 @@ export default {
       players: this.initialState?.players || [],
       leaderId: this.initialState?.leaderId || null,
       phase: this.initialState?.phase || 'waiting',
-      planes: [],
-      isReady: false,
+      planes: (this.initialState?.ownPlanes?.length ? this.initialState.ownPlanes : randomPlanes()).map(withId),
+      isReady: !!this.initialState?.players?.find((p) => p.id === this.socket.id)?.ready,
+      preparing: false,
+      starting: false,
       selectedPlaneIndex: -1,
       // 拖拽状态
       isDragging: false,
@@ -134,6 +136,11 @@ export default {
       if (this.players.length < 2) return '已准备，等待对手加入';
       if (!this.canStartGame) return '已准备，等待对手准备';
       return this.isLeader ? '双方都准备好了，点「开始游戏」' : '已准备，等待房主开始游戏';
+    },
+  },
+  watch: {
+    canStartGame(value) {
+      if (value && this.isAi) this.startGame();
     },
   },
   mounted() {
@@ -174,24 +181,35 @@ export default {
       notify(data?.message || '操作失败');
     },
     ready() {
+      if (this.preparing) return;
       if (this.planes.length !== 3) {
         notify('请放置 3 架飞机');
         return;
       }
+      this.preparing = true;
       this.isReady = true;
       this.selectedPlaneIndex = -1;
       const planes = this.planes.map((p) => ({ coordinates: p.coordinates.map(({ row, col }) => ({ row, col })) }));
       this.socket.emit('playerReady', { planes }, (res) => {
-        if (res && !res.success) this.isReady = false;
+        this.preparing = false;
+        this.isReady = !!res?.success;
+        if (!res?.success) notify(res?.message || '准备失败，请重试');
       });
     },
     unready() {
       // 取消准备后才能调整布局，避免房主用旧布局开局
-      this.isReady = false;
-      this.socket.emit('playerUnready', {});
+      this.socket.emit('playerUnready', {}, (res) => {
+        if (res?.success) this.isReady = false;
+        else notify(res?.message || '取消准备失败，请重试');
+      });
     },
     startGame() {
-      this.socket.emit('startGame', {});
+      if (this.starting) return;
+      this.starting = true;
+      this.socket.emit('startGame', {}, (res) => {
+        this.starting = false;
+        if (!res?.success) notify(res?.message || '开始失败，请重试');
+      });
     },
     leaveRoom() {
       this.socket.emit('leaveRoom', {});
@@ -842,6 +860,31 @@ h2 {
 }
 
 @media (max-width: 768px) {
+  .room-info { padding: 12px 16px; margin-bottom: 0; }
+  .room-info h2 { text-align: left; font-size: 1rem; margin-bottom: 8px; }
+  .room-info > .info-row { margin-bottom: 6px; }
+  .players-list { display: flex; gap: 8px; margin: 8px 0; }
+  .player-item { flex: 1; min-width: 0; padding: 8px; margin-bottom: 0; }
+  .player-info { flex-wrap: wrap; gap: 4px; font-size: 0.85rem; }
+  .player-name { overflow-wrap: anywhere; }
+  .player-status { font-size: 0.75rem; }
+  .room-actions { margin-top: 8px; }
+  .room-actions button { padding: 5px 10px; font-size: 0.8rem; background: #edf2f6; color: #526579; box-shadow: none; }
+  .setup-board { padding-bottom: 12px; }
+  .setup-board h2 { margin-bottom: 8px; font-size: 1.15rem; }
+  .setup-controls {
+    position: sticky;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    z-index: 10;
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #dfe6e9;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 4px 16px rgba(25, 48, 70, 0.12);
+    gap: 6px;
+  }
+  .setup-controls button { padding: 9px 10px; font-size: 0.82rem; flex: 1 0 auto; }
   .room-view {
     flex-direction: column;
     gap: 12px;
@@ -943,4 +986,4 @@ h2 {
   border-bottom-left-radius: 40%;
   border-bottom-right-radius: 40%;
 }
-</style> 
+</style>

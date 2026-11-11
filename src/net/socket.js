@@ -12,17 +12,27 @@
 
 const RESERVED = new Set(['connect', 'disconnect', 'connect_error', 'error', 'reconnect', 'session_lost']);
 
-class RealtimeClient {
-  constructor(transport) {
+export class RealtimeClient {
+  constructor(transport, { sessionStore = null, requestTimeoutMs = 8000 } = {}) {
     this.transport = transport;
     this.handlers = new Map();
     this.anyHandlers = new Set();
     this.acks = new Map();
     this.nextAck = 1;
+    this.requestPrefix = Math.random().toString(36).slice(2);
     this.id = undefined;
     this.connected = false;
     this.closed = false;
     this.resumeKey = undefined;
+    this.sessionStore = sessionStore;
+    this.requestTimeoutMs = requestTimeoutMs;
+    try {
+      const saved = JSON.parse(sessionStore?.getItem('plane-session-v1') || 'null');
+      if (typeof saved?.id === 'string' && typeof saved?.k === 'string') {
+        this.id = saved.id;
+        this.resumeKey = saved.k;
+      }
+    } catch { /* 存储不可用时仍可在当前页面断线续接。 */ }
     transport.start({
       // 每次底层连接建立后先发 hi；带上次的 id/k 请求接回原会话
       onOpen: (sendRaw = (text) => this.transport.send(text)) => {
@@ -79,17 +89,18 @@ class RealtimeClient {
     const frame = { t: 'e', e: event, d: args };
     if (typeof args[args.length - 1] === 'function') {
       const callback = args.pop();
-      frame.a = this.nextAck++;
-      this.acks.set(frame.a, callback);
+      frame.a = `${this.requestPrefix}-${this.nextAck++}`;
+      const timer = setTimeout(() => this.completeAck(frame.a, [{ success: false, message: '请求超时，请重试', code: 'TIMEOUT' }]), this.requestTimeoutMs);
+      this.acks.set(frame.a, { callback, timer });
     }
     if (!this.connected) {
       console.warn(`连接未就绪，事件 ${event} 未发送`);
-      if (frame.a) this.acks.delete(frame.a);
+      this.completeAck(frame.a, [{ success: false, message: '连接中断，请稍后重试', code: 'DISCONNECTED' }]);
       return this;
     }
-    Promise.resolve(this.transport.send(JSON.stringify(frame))).catch((error) => {
+    Promise.resolve().then(() => this.transport.send(JSON.stringify(frame))).catch((error) => {
       console.warn(`发送事件 ${event} 失败:`, error);
-      if (frame.a) this.acks.delete(frame.a);
+      this.completeAck(frame.a, [{ success: false, message: '发送失败，请重试', code: 'SEND_FAILED' }]);
     });
     return this;
   }
@@ -99,6 +110,14 @@ class RealtimeClient {
     this.transport.close();
     this.handleClose('io client disconnect');
     return this;
+  }
+
+  completeAck(id, args) {
+    const pending = this.acks.get(id);
+    if (!pending) return;
+    this.acks.delete(id);
+    clearTimeout(pending.timer);
+    pending.callback(...args);
   }
 
   dispatch(event, args) {
@@ -123,6 +142,9 @@ class RealtimeClient {
       const previousId = this.id;
       this.id = frame.id;
       this.resumeKey = frame.k;
+      try {
+        this.sessionStore?.setItem('plane-session-v1', JSON.stringify({ id: this.id, k: this.resumeKey }));
+      } catch { /* 私密模式等环境允许不持久化。 */ }
       this.connected = true;
       if (frame.resumed && previousId === frame.id) {
         this.dispatch('reconnect', []);
@@ -141,16 +163,17 @@ class RealtimeClient {
       }
       this.dispatch(frame.e, args);
     } else if (frame.t === 'ack') {
-      const callback = this.acks.get(frame.a);
-      this.acks.delete(frame.a);
-      callback?.(...(Array.isArray(frame.d) ? frame.d : []));
+      this.completeAck(frame.a, Array.isArray(frame.d) ? frame.d : []);
     }
   }
 
   handleClose(reason) {
-    this.acks.clear();
-    if (!this.connected) return;
+    const wasConnected = this.connected;
     this.connected = false;
+    for (const id of [...this.acks.keys()]) {
+      this.completeAck(id, [{ success: false, message: '连接中断，请稍后重试', code: 'DISCONNECTED' }]);
+    }
+    if (!wasConnected) return;
     this.dispatch('disconnect', [reason]);
   }
 }
@@ -241,5 +264,7 @@ function defaultWebSocketUrl() {
 export function createSocket({ sdk = null, endpoint = 'game' } = {}) {
   // 编译期分支：微应用包里不包含原生 WebSocket 代码，网页版里不包含 SDK 传输
   if (__MINI_APP__) return new RealtimeClient(sdkTransport(sdk, endpoint));
-  return new RealtimeClient(nativeTransport(defaultWebSocketUrl()));
+  let sessionStore = null;
+  try { sessionStore = window.sessionStorage; } catch { /* 存储不可用。 */ }
+  return new RealtimeClient(nativeTransport(defaultWebSocketUrl()), { sessionStore });
 }
