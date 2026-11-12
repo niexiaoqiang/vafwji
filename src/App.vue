@@ -3,7 +3,7 @@
     <header class="topbar">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">✈</span>
-        <span class="brand-name">炸飞机</span>
+        <span class="brand-name">全民打飞机</span>
       </div>
       <nav class="crumb" aria-label="当前位置">
         <span class="crumb-item" :class="{ on: view === 'lobby' }">大厅</span>

@@ -308,7 +308,7 @@ export default {
     },
     async copyInvite() {
       try {
-        await copyText(`来炸飞机对战吧！房间号：${this.roomId}`);
+        await copyText(`来全民打飞机对战吧！房间号：${this.roomId}`);
         notify('邀请已复制，发给朋友即可加入');
       } catch {
         notify(`房间号：${this.roomId}`);

@@ -11,7 +11,7 @@ services:
       # 社区微应用鉴权（/mini-app/ws 校验平台 JWT）。部署到公网并在社区上架时填写：
       # - MINI_APP_ISSUER=https://linux.do           # 社区基地址，含子目录，不以 / 结尾
       # - MINI_APP_ID=社区应用页分配的应用ID
-      # - MINI_APP_PUBLIC_ORIGIN=https://plane.example.com  # 本服务对外 HTTPS 地址
+      # - MINI_APP_PUBLIC_ORIGIN=https://zha-fei-ji.onrender.com  # 本服务对外 HTTPS 地址
       # - MINI_APP_CHANNELS=production,sandbox       # 沙箱调试时加入 sandbox
     restart: unless-stopped
     networks:

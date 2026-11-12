@@ -1,0 +1,7 @@
+全民打飞机应用图标
+生成方式：内置 image_gen 工具
+输出：public/quanmin-plane-icon.png，1254 × 1254 PNG
+用途：社区应用页上传图标、网页版 favicon。微应用运行 ZIP 不包含 public 目录，平台图标在应用页单独上传。
+
+生成提示词：
+Create a finished square app icon for a friendly Chinese multiplayer deduction board game named 全民打飞机 (Planes for Everyone). Deliver one clean, premium, polished app icon, not a mockup or icon sheet. No text, letters, numbers, watermark or border. Full-bleed midnight navy blue background with subtle teal radial illumination. Large centered top-down airplane constructed from exactly ten softly bevelled connected square board-game tiles, pointing upwards: row 1 a single golden-yellow cockpit tile at center; row 2 five mint/turquoise tiles across forming the wings; row 3 one mint tile at center; row 4 three mint tiles across forming the tail. The arrangement should read clearly as the classic hidden-plane grid-game silhouette rather than a realistic fighter jet. Attractive tactile enamel, restrained 3D bevels, crisp clean geometry, subtle shadows and luminous edges, mostly flat top-down view. Behind it, a very understated regular square game-board grid and a single soft radar arc suggest tactical deduction, without clutter. Friendly strategic puzzle-game mood, not realistic warfare. Strong silhouette and very high contrast at 48px. Airplane and any meaningful details fit within the central 72 percent of the square, safe for circular cropping. Background fills every corner, no external rounded-square frame. 1024x1024 square composition.

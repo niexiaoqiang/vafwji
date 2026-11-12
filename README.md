@@ -1,6 +1,6 @@
-# 炸飞机
+# 全民打飞机
 
-双人回合制的“炸飞机”网页游戏：双方在 10×10 棋盘上各藏 3 架飞机，轮流攻击猜位置，先击落对方全部飞机机头的一方获胜。支持**联机对战**和**人机对战**，既能作为独立网页运行，也能打包成 Discourse 社区微应用。
+双人回合制的“全民打飞机”网页游戏：双方在 10×10 棋盘上各藏 3 架飞机，轮流攻击猜位置，先击落对方全部飞机机头的一方获胜。支持**联机对战**和**人机对战**，既能作为独立网页运行，也能打包成 Discourse 社区微应用。
 
 ## 游戏规则
 
@@ -205,7 +205,7 @@ docker exec -it airplane-game sh
 environment:
   - MINI_APP_ISSUER=https://linux.do              # 社区基地址，含子目录，不以 / 结尾
   - MINI_APP_ID=社区应用页分配的应用ID
-  - MINI_APP_PUBLIC_ORIGIN=https://plane.example.com  # 本服务对外 HTTPS 地址
+  - MINI_APP_PUBLIC_ORIGIN=https://zha-fei-ji.onrender.com  # 本服务对外 HTTPS 地址
   - MINI_APP_CHANNELS=production,sandbox          # sandbox 调试时加入 sandbox
 ```
 
@@ -226,7 +226,7 @@ environment:
 2. 构建 ZIP：
 
 ```bash
-MINI_APP_ID=应用ID MINI_APP_VERSION=1.0.0 MINI_APP_WS_URL=wss://plane.example.com/mini-app/ws npm run build:mini-app
+MINI_APP_ID=应用ID MINI_APP_VERSION=1.0.0 MINI_APP_WS_URL=wss://zha-fei-ji.onrender.com/mini-app/ws npm run build:mini-app
 ```
 
 3. 在应用的沙箱页签上传 `dist/mini-app/package/app.zip`，在 `/apps-sandbox/<app-id>/<version>-<sha>` 中测试，再按[提审说明](https://github.com/linux-do/mapp-developer-guide/blob/main/docs/submission-review.md)发布。调试版（保留 source map）使用 `npm run build:mini-app:debug`。

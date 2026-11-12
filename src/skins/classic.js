@@ -2,7 +2,7 @@
 export default {
   id: 'classic',
   name: '经典蓝',
-  author: '炸飞机',
+  author: '全民打飞机',
   description: '白底蓝按钮的经典配色，简洁明亮',
   mode: 'light',
   order: 3,

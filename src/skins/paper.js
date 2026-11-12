@@ -2,7 +2,7 @@
 export default {
   id: 'paper',
   name: '晴空纸面',
-  author: '炸飞机',
+  author: '全民打飞机',
   description: '米色纸张与手写感标题，清爽亲切，适合浅色论坛',
   mode: 'light',
   order: 2,

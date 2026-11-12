@@ -2,7 +2,7 @@
 export default {
   id: 'radar',
   name: '夜空雷达',
-  author: '炸飞机',
+  author: '全民打飞机',
   description: '深色夜空与雷达屏，适合深色论坛和夜间游玩',
   mode: 'dark',
   order: 1,

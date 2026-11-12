@@ -74,7 +74,7 @@ function section(skin) {
     </header>
     <div class="shots">
       <div class="desk">
-        <div class="topbar"><span class="mark">✈</span><b class="title">炸飞机</b><span class="crumb">对战 小王</span><span class="sp"></span><span class="ghost">🎨 皮肤</span><span class="ghost">规则</span></div>
+        <div class="topbar"><span class="mark">✈</span><b class="title">全民打飞机</b><span class="crumb">对战 小王</span><span class="sp"></span><span class="ghost">🎨 皮肤</span><span class="ghost">规则</span></div>
         <div class="main">
           <div class="card status"><b class="title">你的回合</b><span class="bar"><i></i></span><b class="timer">20s</b><span class="dim">对方 2/3　我方 3/3</span></div>
           <div class="battle">
@@ -84,7 +84,7 @@ function section(skin) {
         </div>
       </div>
       <div class="phone"><div class="screen">
-        <div class="topbar"><span class="mark">✈</span><b class="title">炸飞机</b><span class="sp"></span><span class="ghost">🎨</span></div>
+        <div class="topbar"><span class="mark">✈</span><b class="title">全民打飞机</b><span class="sp"></span><span class="ghost">🎨</span></div>
         <div class="pmain">
           <div class="card hero"><b class="title big">快速开始</b><span class="dim">和电脑对战，不用等人</span><span class="seg"><span>简单</span><span class="on">普通</span><span>困难</span></span><span class="btn">▶ 开始人机对战</span></div>
           <div class="card hero"><b class="title big">好友对战</b><span class="dim">把房间号发给朋友</span><span class="btn">创建房间</span><span class="row"><span class="input">输入房间号</span><span class="btn2">加入</span></span></div>
@@ -152,8 +152,8 @@ async function main() {
     .filter((skin) => validateSkin(skin).errors.length === 0)
     .map(withDefaults)
     .sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
-  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>炸飞机皮肤预览</title><style>${CSS}</style></head><body>
-<h1>炸飞机 · 皮肤预览</h1><p class="intro">共 ${skins.length} 套皮肤，由 npm run skins:preview 生成。不符合规范的皮肤不会出现在这里，先运行 npm run skins:check 查看原因。</p>
+  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>全民打飞机皮肤预览</title><style>${CSS}</style></head><body>
+<h1>全民打飞机 · 皮肤预览</h1><p class="intro">共 ${skins.length} 套皮肤，由 npm run skins:preview 生成。不符合规范的皮肤不会出现在这里，先运行 npm run skins:check 查看原因。</p>
 ${skins.map(section).join('\n')}
 </body></html>`;
   await mkdir(path.dirname(out), { recursive: true });

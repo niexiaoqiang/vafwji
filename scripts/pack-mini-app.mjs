@@ -2,7 +2,7 @@
 //
 // 用法：
 //   MINI_APP_ID=<应用ID> MINI_APP_VERSION=1.0.0 \
-//   MINI_APP_WS_URL=wss://plane.example.com/mini-app/ws \
+//   MINI_APP_WS_URL=wss://zha-fei-ji.onrender.com/mini-app/ws \
 //   npm run build:mini-app
 //
 // MINI_APP_ID 必须从社区个人资料的应用页复制，不要自行生成。
