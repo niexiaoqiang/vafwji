@@ -11,7 +11,7 @@
     "format": "prettier --write src/",
     "server": "node server.js",
     "start": "concurrently \"npm run server\" \"npm run dev\"",
-    "build:mini-app": "vite build --config vite.mini-app.config.js && node scripts/pack-mini-app.mjs",
+    "build:mini-app": "node scripts/mini-app-config.mjs && vite build --config vite.mini-app.config.js && node scripts/pack-mini-app.mjs",
     "build:mini-app:debug": "MINI_APP_DEBUG=1 npm run build:mini-app",
     "skins:check": "node scripts/check-skins.mjs",
     "skins:preview": "node scripts/preview-skins.mjs",

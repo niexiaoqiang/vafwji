@@ -27,6 +27,15 @@ function makeId() {
   return randomBytes(12).toString('base64url');
 }
 
+/** 只有同一接入端点、社区、应用、渠道和用户才能续接旧会话。 */
+export function canResumeSession(previous, next) {
+  if (previous.endpoint !== next.endpoint) return false;
+  const a = previous.platformUser;
+  const b = next.platformUser;
+  if (!a || !b) return !a && !b;
+  return ['issuer', 'id', 'appId', 'channel'].every((field) => a[field] === b[field]);
+}
+
 class Emitter {
   constructor() {
     this.handlers = new Map();
@@ -224,6 +233,7 @@ export function createRealtime(server, { paths }) {
         return;
       }
     }
+    data = { ...data, endpoint: route.path };
     wss.handleUpgrade(request, netSocket, head, (ws) => {
       ws.isAlive = true;
       ws.on('pong', () => {
@@ -261,9 +271,7 @@ export function createRealtime(server, { paths }) {
         if (frame?.t === 'hi') {
           const resume = frame.resume;
           const existing = resume && typeof resume.id === 'string' ? hub.sockets.sockets.get(resume.id) : null;
-          // 续接时要求同一认证主体（微应用模式下为同一社区用户）
-          const sameUser = !existing?.data?.platformUser?.id || existing.data.platformUser.id === data?.platformUser?.id;
-          if (existing && !existing.closed && existing.resumeKey === resume.k && sameUser) {
+          if (existing && !existing.closed && existing.resumeKey === resume.k && canResumeSession(existing.data, data)) {
             socket = existing;
             socket.attach(ws, { resumed: true });
           } else {

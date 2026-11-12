@@ -48,7 +48,7 @@ function validateJwk(body) {
 }
 
 /**
- * 返回 WebSocket 握手鉴权函数；未配置时返回 null（握手不鉴权，仅适合本地开发）。
+ * 返回 WebSocket 握手鉴权函数；未配置时返回 null，由服务入口拒绝微应用连接。
  */
 export function createMiniAppAuthenticator() {
   const config = readConfig();
@@ -122,6 +122,6 @@ export function createMiniAppAuthenticator() {
       if (!refreshed || refreshed === key) throw error;
       identity = await verify(request, refreshed);
     }
-    return { platformUser: { issuer: identity.iss, id: identity.sub, channel: identity.channel } };
+    return { platformUser: { issuer: identity.iss, id: identity.sub, appId: identity.app_id, channel: identity.channel } };
   };
 }

@@ -209,7 +209,11 @@ environment:
   - MINI_APP_CHANNELS=production,sandbox          # sandbox 调试时加入 sandbox
 ```
 
-配置后 `/mini-app/ws` 会从 `MINI_APP_ISSUER/mini-app-api/jwks` 获取公钥并校验每次握手；未配置时不校验（仅适合本地开发）。`/ws` 始终供网页版使用。
+配置后 `/mini-app/ws` 会从 `MINI_APP_ISSUER/mini-app-api/jwks` 获取公钥并校验每次握手；未配置时拒绝微应用连接。`/ws` 始终供网页版使用。
+
+网页版、微应用 sandbox、微应用 production 各使用独立房间池，不能跨池查看、加入、匹配或续接。渠道由已验证 JWT 决定，不能通过客户端业务消息指定。同一 Render 服务可以同时允许 `production,sandbox`，房间仍然隔离。首次沙箱测试可仅配置 `sandbox`。
+
+本项目应用 ID 已填写为 `01a1cdba-4aad-77cd-9c6e-89dcc61b7ffa`。Render 配置与提审步骤见 [微应用发布说明](docs/mini-app-release.md)。
 
 可选的对局参数：
 

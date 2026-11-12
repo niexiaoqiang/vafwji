@@ -6,6 +6,8 @@ import { createSocket } from './net/socket.js';
 export const isMiniApp = __MINI_APP__;
 
 let sdk = null;
+let pageRendered = false;
+let platformReady = false;
 let renderedReported = false;
 const memoryStore = new Map();
 
@@ -18,6 +20,9 @@ export async function initPlatform() {
   const { getSDK } = await import('@discourse-mini-app/sdk');
   sdk = getSDK();
   await sdk.ready;
+  platformReady = true;
+  // 挂载和 SDK 加载可能以任意顺序完成；读取用户失败也不阻塞首屏就绪。
+  await reportRendered();
   let user = null;
   if (sdk.permissions.has('user.read')) {
     try {
@@ -39,7 +44,12 @@ export function connectRealtime() {
 
 /** 首次渲染（或显示错误）后通知容器，只调用一次。 */
 export async function markRendered() {
-  if (!isMiniApp || !sdk || renderedReported) return;
+  pageRendered = true;
+  await reportRendered();
+}
+
+async function reportRendered() {
+  if (!isMiniApp || !pageRendered || !platformReady || renderedReported) return;
   renderedReported = true;
   try {
     await sdk.lifecycle.ready();
