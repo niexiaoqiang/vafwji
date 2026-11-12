@@ -195,7 +195,8 @@ export default {
       gameId: null,
       leaving: false,
       selectedTarget: null,
-      quickAttack: storage.getItem('quickAttack') === 'true',
+      // 默认快速攻击（点格子立即攻击）；玩家手动关闭后记住选择
+      quickAttack: storage.getItem('quickAttack') !== 'false',
       lastAttack: null,
       lastAttackText: '',
       myId: null,

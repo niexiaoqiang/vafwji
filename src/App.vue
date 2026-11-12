@@ -14,7 +14,7 @@
       </nav>
       <div class="topbar-actions">
         <button type="button" class="btn btn-ghost btn-sm" @click="showSkins = true">🎨 <span class="hide-sm">皮肤</span></button>
-        <button type="button" class="btn btn-ghost btn-sm" @click="showRules = true">规则</button>
+        <button type="button" class="btn btn-ghost btn-sm" @click="showTutorial = true">教程</button>
       </div>
     </header>
 
@@ -58,6 +58,13 @@
       />
     </main>
 
+    <TutorialDialog
+      v-if="showTutorial"
+      :canStartAi="view === 'lobby'"
+      @close="closeTutorial"
+      @startAi="startTutorialAi"
+      @openRules="showRules = true"
+    />
     <RulesDialog v-if="showRules" @close="showRules = false" />
     <SkinPicker v-if="showSkins" @close="showSkins = false" />
   </div>
@@ -66,19 +73,22 @@
 <script>
 import { markRaw } from 'vue';
 import { notify } from './ui/dialog.js';
-import { initPlatform, connectRealtime, markRendered, isMiniApp } from './platform.js';
+import { initPlatform, connectRealtime, markRendered, isMiniApp, persistent, storage } from './platform.js';
 import { createLocalSession } from './local/session.js';
 import RoomView from './components/RoomView.vue';
 import GameView from './components/GameView.vue';
 import LobbyView from './components/LobbyView.vue';
 import RulesDialog from './components/RulesDialog.vue';
+import TutorialDialog from './components/TutorialDialog.vue';
 import SkinPicker from './components/SkinPicker.vue';
 import { loadSavedSkin } from './skins/index.js';
 import { LEVELS } from './local/ai.js';
 
+const TUTORIAL_KEY = 'tutorial-seen';
+
 export default {
   name: 'App',
-  components: { RoomView, GameView, LobbyView, RulesDialog, SkinPicker },
+  components: { RoomView, GameView, LobbyView, RulesDialog, TutorialDialog, SkinPicker },
   data() {
     return {
       isMiniApp,
@@ -96,6 +106,7 @@ export default {
       connectionLost: false,
       netNotice: '',
       showRules: false,
+      showTutorial: false,
       showSkins: false,
     };
   },
@@ -128,12 +139,14 @@ export default {
       try {
         const { user } = await initPlatform();
         if (user) this.defaultUsername = user.name || user.username || '';
-        // 平台就绪后才能读取社区存储里的皮肤选择
+        // 平台就绪后才能读取社区存储里的皮肤选择和教程记录
         loadSavedSkin();
+        this.maybeShowTutorial();
         this.netSocket = markRaw(connectRealtime());
       } catch (error) {
         console.error('联机初始化失败:', error);
         loadSavedSkin();
+        this.maybeShowTutorial();
         this.netNotice = `暂时无法联机（${error?.message || error}），可以先玩人机对战`;
         return;
       }
@@ -173,6 +186,23 @@ export default {
           this.backToLobby();
         }
       });
+    },
+    // 第一次进入游戏时自动打开教程，看完或跳过后不再自动弹出
+    async maybeShowTutorial() {
+      try {
+        if (!(await persistent.get(TUTORIAL_KEY)) && this.view === 'lobby') this.showTutorial = true;
+      } catch {
+        // 读不到记录就不打扰玩家
+      }
+    },
+    closeTutorial() {
+      this.showTutorial = false;
+      persistent.set(TUTORIAL_KEY, '1').catch(() => {});
+    },
+    startTutorialAi() {
+      this.closeTutorial();
+      const username = storage.getItem('username') || this.defaultUsername || `飞行员 ${Math.floor(1000 + Math.random() * 9000)}`;
+      this.onStartAi({ username, level: 'easy' });
     },
     restoreSession() {
       this.netSocket.emit('syncRoom', {}, (res) => {

@@ -8,6 +8,8 @@ const url = process.env.GAME_TEST_URL || 'http://127.0.0.1:5174';
 const errors = [];
 async function player(name, mobile = false) {
   const context = await browser.newContext(mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {});
+  // 已看过新手教程，避免首次进入时的教程弹窗挡住后续操作
+  await context.addInitScript(() => localStorage.setItem('tutorial-seen', '1'));
   const page = await context.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(url);
@@ -24,6 +26,39 @@ async function stats(page) {
 }
 
 try {
+  // 新手教程：首次进入自动弹出，练习击落后可直接开始人机练习；看完不再自动弹出
+  for (const mobile of [false, true]) {
+    const context = await browser.newContext(mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {});
+    const page = await context.newPage();
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.goto(url);
+    const tut = page.locator('.tut');
+    await expect(tut).toBeVisible();
+    await expect(tut.locator('h2')).toHaveText('目标：先击落对方 3 架飞机');
+    await tut.getByRole('button', { name: '下一步' }).click();
+    await tut.getByRole('button', { name: '下一步' }).click();
+    await expect(tut.getByRole('button', { name: '先击落飞机' })).toBeDisabled();
+    await tut.locator('.pcell').nth(0).click();
+    await expect(tut.locator('.pcell').nth(0)).toHaveClass(/miss/);
+    await tut.locator('.pcell').nth(15).click();
+    await expect(tut.locator('.pcell').nth(15)).toHaveClass(/hit/);
+    await tut.locator('.pcell').nth(10).click();
+    await expect(tut.locator('.coach')).toContainText('击落');
+    await tut.getByRole('button', { name: '下一步' }).click();
+    await tut.getByRole('button', { name: '下一步' }).click();
+    await tut.getByRole('button', { name: '开始人机练习（简单）' }).click();
+    await expect(page.locator('.room-view')).toBeVisible();
+    await expect(page.locator('.crumb')).toContainText('简单');
+    await page.reload();
+    await expect(page.locator('.lobby')).toBeVisible();
+    await page.waitForTimeout(800);
+    await expect(tut).toHaveCount(0);
+    await page.getByRole('button', { name: '教程' }).click();
+    await expect(tut).toBeVisible();
+    await context.close();
+  }
+  console.log('PASS tutorial: first-visit popup, practice sink, start easy AI, not shown again, reopen');
+
   const ai = await player('手机测试', true);
   await ai.getByRole('button', { name: '开始人机对战' }).click();
   await expect(ai.locator('.board-cell.cell-plane')).toHaveCount(30);
@@ -32,6 +67,8 @@ try {
   await ai.screenshot({ path: '/tmp/airplane-setup-after.png', fullPage: true });
   await ready.click();
   await expect(ai.locator('.status-text')).toContainText('你的回合');
+  // 快速攻击默认开启，这里关掉以覆盖“先选坐标再确认”的流程
+  await ai.locator('.quick-toggle input').uncheck();
   const cell = ai.locator('button[aria-label="A1"]');
   await cell.click();
   await expect(cell).toHaveClass(/cell-selected-target/);
@@ -65,8 +102,8 @@ try {
   await expect(b.locator('.game-view')).toBeVisible();
   const shooter = (await a.locator('.status-text').innerText()).includes('你的回合') ? a : b;
   const other = shooter === a ? b : a;
+  // 默认快速攻击：点格子即攻击
   await shooter.locator('button[aria-label="A1"]').click();
-  await shooter.getByRole('button', { name: '攻击 A1', exact: true }).click();
   await expect(shooter.locator('button[aria-label="A1"]')).toHaveClass(/cell-(miss|hit|sink)/);
   // fx-* 是短暂的受击动效 class，比较刷新前后的格子状态时忽略
   const stableClass = async () => (await shooter.locator('button[aria-label="A1"]').getAttribute('class'))

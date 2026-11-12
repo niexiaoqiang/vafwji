@@ -7,6 +7,8 @@ const url = process.env.GAME_TEST_URL || 'http://127.0.0.1:5175';
 const errors = [];
 async function player(name, mobile = false) {
   const context = await browser.newContext(mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : { viewport: { width: 1280, height: 900 } });
+  // 已看过新手教程，避免首次进入时的教程弹窗挡住后续操作
+  await context.addInitScript(() => localStorage.setItem('tutorial-seen', '1'));
   const page = await context.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(url);

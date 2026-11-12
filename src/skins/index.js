@@ -20,10 +20,12 @@ export const SKINS = Object.values(modules)
 
 const STORAGE_KEY = 'skin';
 const SYSTEM = 'system';
+// 没有选过皮肤的玩家默认使用经典蓝；“跟随系统”仍可在皮肤列表中选择
+const DEFAULT_SKIN = 'classic';
 
 /** 当前皮肤状态：组件读取 skinState.skin.icons 来显示棋盘符号。 */
 export const skinState = reactive({
-  choice: SYSTEM, // 玩家的选择：皮肤 id，或 system（跟随系统深浅色）
+  choice: DEFAULT_SKIN, // 玩家的选择：皮肤 id，或 system（跟随系统深浅色）
   skin: SKINS[0],
 });
 
@@ -63,14 +65,14 @@ function apply(skin) {
 
 /** 选择皮肤（皮肤 id 或 'system'）并记住。 */
 export function setSkin(choice, { persist = true } = {}) {
-  skinState.choice = choice === SYSTEM || SKINS.some((s) => s.id === choice) ? choice : SYSTEM;
+  skinState.choice = choice === SYSTEM || SKINS.some((s) => s.id === choice) ? choice : DEFAULT_SKIN;
   apply(resolve(skinState.choice));
   if (persist) persistent.set(STORAGE_KEY, skinState.choice).catch(() => {});
 }
 
-/** 启动时先按系统深浅色套用，平台就绪后再读取玩家保存的选择。 */
+/** 启动时先套用默认皮肤，平台就绪后再读取玩家保存的选择。 */
 export function initSkin() {
-  apply(resolve(SYSTEM));
+  apply(resolve(DEFAULT_SKIN));
   darkQuery?.addEventListener?.('change', () => {
     if (skinState.choice === SYSTEM) apply(systemSkin());
   });
